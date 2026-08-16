@@ -1,0 +1,1383 @@
+//@version=6
+indicator("Forever Model", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+grpalerts        = "ALERTS SETTINGS"
+enableAlerts     = input.bool(true,  "Alerts?",                       group=grpalerts)
+alertSMTFVG      = input.bool(true,  "SMT & FVG Tagged?",             group=grpalerts, active=enableAlerts)
+alertModelActive = input.bool(true,  "Model Active?",                 group=grpalerts, active=enableAlerts)
+alertProjHit     = input.bool(false, "Orderblock Projection Hit?",    group=grpalerts, active=enableAlerts)
+alertERLHit      = input.bool(false, "External Range Liquidity Hit?", group=grpalerts, active=enableAlerts)
+
+grpgen      = "GENERAL SETTINGS"
+showHistory = input.int(1,    "History",             group=grpgen, minval=1, tooltip="Number of TP-frozen setups to keep visible. Active trades always shown.")
+bias        = input.string("Neutral",   "Bias",               group=grpgen, options=["Neutral","Bullish","Bearish"])
+modelType   = input.string("Auto",      "Timeframe Alignment",group=grpgen, options=["Auto","1m-15m","3m-30m","5m-1H","15m-4H","1H-1D","4H-1W","1D-1W","Custom"])
+customLTF   = input.timeframe("5",  "Custom LTF                      ", group=grpgen, inline="custom", active=modelType=="Custom")
+customHTF   = input.timeframe("60", "",                                   group=grpgen, inline="custom", tooltip="Only active when Alignment is set to Custom", active=modelType=="Custom")
+obSLCalc    = input.string("Automatic","OB Invalidation",     group=grpgen, options=["Automatic","OB High Low","SMT Based Invalidation"], tooltip="Automatic uses SMT-based SL below 1H, OB High/Low on 1H and above.")
+obProjBool  = input.bool(true,  "",               group=grpgen, inline="proj")
+obProjInput = input.string("2, 3","OB Projections",group=grpgen, inline="proj")
+
+
+grpsmt      = "SMT SETTINGS"
+autoSMT     = input.bool(true,        "Auto Detect SMT Pair",  group=grpsmt)
+smtPair     = input.symbol("ES1!",    "Manual Pair 1",         group=grpsmt, inline="smt1")
+inverse1    = input.bool(false,       "Inverse?",              group=grpsmt, inline="smt1")
+useSmtPair2 = input.bool(false,       "2nd SMT Pair",          group=grpsmt, inline="smt2")
+smtPair2    = input.symbol("YM1!",    "",                      group=grpsmt, inline="smt2", active=useSmtPair2)
+inverse2    = input.bool(false,       "Inverse?",              group=grpsmt, inline="smt2", active=useSmtPair2)
+
+grpmdl       = "MODEL SETTINGS"
+labelSize    = input.string("Small",                             "Label Size",  group=grpmdl, options=["Tiny","Small","Normal","Large"])
+fvgCol       = input.color(color.new(#787b86, 90),              "FVG                      ", group=grpmdl, inline="fvg")
+showCE       = input.bool(true,                                  "CE                ",        group=grpmdl, inline="ce")
+ceColor      = input.color(color.new(#787b86, 60),              "",                          group=grpmdl, inline="ce", active=showCE)
+ceStyle      = input.string("Solid",                            "",                           group=grpmdl, inline="ce", options=["Solid","Dashed","Dotted"], active=showCE)
+ceWidth      = input.int(1,                                     "",                           group=grpmdl, inline="ce", options=[1,2,3,4], active=showCE)
+erlColor     = input.color(color.new(color.black, 0),           "ERL                      ", group=grpmdl, inline="erl")
+erlStyle     = input.string("Solid",                            "",                           group=grpmdl, inline="erl", options=["Solid","Dashed","Dotted"])
+erlWidth     = input.int(1,                                     "",                           group=grpmdl, inline="erl", options=[1,2,3,4])
+sweepLineCol = input.color(#1a1a1a,                             "Sweep                  ",   group=grpmdl, inline="swp")
+sweepStyle   = input.string("Dotted",                           "",                           group=grpmdl, inline="swp", options=["Solid","Dashed","Dotted"])
+sweepWidth   = input.int(1,                                     "",                           group=grpmdl, inline="swp", options=[1,2,3,4])
+smtColor     = input.color(color.new(#000000, 0),               "SMT                      ", group=grpmdl, inline="smt")
+smtLineStyle = input.string("Solid",                            "",                           group=grpmdl, inline="smt", options=["Solid","Dashed","Dotted"])
+smtWidth     = input.int(1,                                     "",                           group=grpmdl, inline="smt", options=[1,2,3,4])
+bullOBColor  = input.color(#0068bd,                             "OrderBlock",                group=grpmdl, inline="ob")
+bearOBColor  = input.color(#bd0000,                             "",                           group=grpmdl, inline="ob")
+obStyle      = input.string("Solid",                            "",                           group=grpmdl, inline="ob", options=["Solid","Dashed","Dotted"])
+obWidth      = input.int(1,                                     "",                           group=grpmdl, inline="ob", options=[1,2,3,4])
+
+grpi          = "INFO TABLE"
+boolTable     = input.bool(true,    "Show Info?",           group=grpi, inline="tbl")
+tableloc1     = input.string("Top",   "Table Location",     group=grpi, inline="loc", options=["Top","Middle","Bottom"])
+tableloc2     = input.string("Right", "",                   group=grpi, inline="loc", options=["Left","Centre","Right"])
+alignmentInfo = input.bool(true,    "Timeframe Alignment",  group=grpi, inline="gen")
+biasInfo      = input.bool(true,    "Bias",                 group=grpi, inline="gen")
+timeInfo      = input.bool(true,    "Time Filter",          group=grpi, inline="gen1")
+dateInfo      = input.bool(true,    "Date",                 group=grpi, inline="gen1")
+
+grpTF             = "TIME FILTER"
+enableTimeFilter  = input.bool(true,   "Enable Time Filter?",  group=grpTF)
+useCustomTimezone = input.bool(false,  "Custom Timezone?",     group=grpTF, inline="tz", active=enableTimeFilter)
+timezoneHours     = input.int(0,       "UTC",                  group=grpTF, inline="tz", minval=-12, maxval=14, active=useCustomTimezone)
+timezoneMinutes   = input.int(0,       "",                     group=grpTF, inline="tz", minval=0,   maxval=59, active=useCustomTimezone)
+enableFilter1     = input.bool(true,   "Filter 1",             group=grpTF, inline="f1", active=enableTimeFilter)
+filter1Session    = input.session("0200-0500", "",             group=grpTF, inline="f1", active=enableFilter1)
+enableFilter2     = input.bool(true,   "Filter 2",             group=grpTF, inline="f2", active=enableTimeFilter)
+filter2Session    = input.session("0800-1100", "",             group=grpTF, inline="f2", active=enableFilter2)
+enableFilter3     = input.bool(true,   "Filter 3",             group=grpTF, inline="f3", active=enableTimeFilter)
+filter3Session    = input.session("1330-1615", "",             group=grpTF, inline="f3", active=enableFilter3)
+enableFilter4     = input.bool(true,   "Filter 4",             group=grpTF, inline="f4", active=enableTimeFilter)
+filter4Session    = input.session("1800-2100", "",             group=grpTF, inline="f4", active=enableFilter4)
+
+grpbacktest    = "BACKTEST MARKERS"
+showInvalid    = input.bool(true,  "",               group=grpbacktest, inline="invalid")
+bullInvalidCol = input.color(color.new(#ff5252, 0),  "Invalidation",  group=grpbacktest, inline="invalid", active=showInvalid)
+bearInvalidCol = input.color(color.new(#ff5252, 0),  "",              group=grpbacktest, inline="invalid", active=showInvalid)
+invalidShape   = input.string("x", "",               group=grpbacktest, inline="invalid", active=showInvalid, options=["x","+","◆"], tooltip="Marker shape for SL invalidation")
+showTargetMark = input.bool(true,  "",               group=grpbacktest, inline="target")
+bullTargetCol  = input.color(color.new(#00a113, 0),  "Target",        group=grpbacktest, inline="target", active=showTargetMark)
+bearTargetCol  = input.color(color.new(#00a113, 0),  "",              group=grpbacktest, inline="target", active=showTargetMark)
+targetShape    = input.string("◆", "",               group=grpbacktest, inline="target", active=showTargetMark, options=["x","+","◆"], tooltip="Marker shape for target hit")
+showNofill     = input.bool(true,  "",               group=grpbacktest, inline="nofill")
+bullNofillCol  = input.color(color.new(#ea9023, 0),  "No Fill",       group=grpbacktest, inline="nofill", active=showNofill)
+bearNofillCol  = input.color(color.new(#ea9023, 0),  "",              group=grpbacktest, inline="nofill", active=showNofill)
+nofillShape    = input.string("◆", "",               group=grpbacktest, inline="nofill", active=showNofill, options=["x","+","◆"], tooltip="Marker shape for no-fill outcome")
+showERLMarker  = input.bool(true,  "",               group=grpbacktest, inline="erl_mark")
+bullERLCol     = input.color(color.new(#00a113, 0),  "ERL",           group=grpbacktest, inline="erl_mark", active=showERLMarker)
+bearERLCol     = input.color(color.new(#00a113, 0),  "",              group=grpbacktest, inline="erl_mark", active=showERLMarker)
+erlShape       = input.string("+", "",               group=grpbacktest, inline="erl_mark", active=showERLMarker, options=["x","+","◆"], tooltip="Marker shape for ERL hit")
+
+// ── Auto SMT resolution ───────────────────────────────────────────────────────
+f_autoSmtPair(string t) =>
+    switch t
+        "ES1!"    => "NQ1!"
+        "NQ1!"    => "ES1!"
+        "GC1!"    => "SI1!"
+        "SI1!"    => "GC1!"
+        "CL1!"    => "RB1!"
+        "RB1!"    => "CL1!"
+        "6E1!"    => "6B1!"
+        "6B1!"    => "6E1!"
+        "6A1!"    => "6N1!"
+        "6N1!"    => "6A1!"
+        "BTC1!"   => "ETH1!"
+        "ETH1!"   => "BTC1!"
+        "BTCUSD"  => "ETHUSD"
+        "ETHUSD"  => "BTCUSD"
+        "BTCUSDT" => "ETHUSDT"
+        "ETHUSDT" => "BTCUSDT"
+        "USDJPY"  => "DXY"
+        "USDCHF"  => "DXY"
+        "USDCAD"  => "DXY"
+        "DXY"     => "USDJPY"
+        "EURUSD"  => "GBPUSD"
+        "GBPUSD"  => "EURUSD"
+        "AUDUSD"  => "NZDUSD"
+        "NZDUSD"  => "AUDUSD"
+        "AUDCAD"  => "NZDCAD"
+        "NZDCAD"  => "AUDCAD"
+        "EURCAD"  => "GBPCAD"
+        "GBPCAD"  => "EURCAD"
+        "EURAUD"  => "GBPAUD"
+        "GBPAUD"  => "EURAUD"
+        "EURNZD"  => "GBPNZD"
+        "GBPNZD"  => "EURNZD"
+        "EURJPY"  => "GBPJPY"
+        "GBPJPY"  => "EURJPY"
+        "AUDJPY"  => "NZDJPY"
+        "NZDJPY"  => "AUDJPY"
+        "XAUUSD"  => "XAGUSD"
+        "XAGUSD"  => "XAUUSD"
+        => na
+
+string _autoResult     = f_autoSmtPair(syminfo.ticker)
+bool   _smtAutoFound   = autoSMT and not na(_autoResult)
+string resolvedSmtPair = _smtAutoFound ? _autoResult : smtPair
+
+resolvedHTF = switch modelType
+    "Custom"  => customHTF
+    "1m-15m"  => "15"
+    "3m-30m"  => "30"
+    "5m-1H"   => "60"
+    "15m-4H"  => "240"
+    "1H-1D"   => "1D"
+    "4H-1W"   => "1W"
+    "1D-1W"   => "1W"
+    => timeframe.period == "1" ? "15" : timeframe.period == "3" ? "30" : timeframe.period == "5" ? "60" :
+       timeframe.period == "15" ? "240" : timeframe.period == "60" ? "1D" : "1W"
+
+resolvedLTF = switch modelType
+    "Custom"  => customLTF
+    "1m-15m"  => "1"
+    "3m-30m"  => "3"
+    "5m-1H"   => "5"
+    "15m-4H"  => "15"
+    "1H-1D"   => "60"
+    "4H-1W"   => "240"
+    "1D-1W"   => "1D"
+    => timeframe.period
+
+validTF  = timeframe.in_seconds(resolvedHTF) >= timeframe.in_seconds()
+cspacer  = timeframe.in_seconds() * 1000
+htfMsec  = timeframe.in_seconds(resolvedHTF) * 1000
+
+const int   MAX_FVGS  = 50
+const color NO_COLOR  = color.new(color.white, 100)
+
+ls(string s)  => s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+lsz(string s) => s == "Tiny" ? size.tiny : s == "Normal" ? size.normal : s == "Large" ? size.large : size.small
+
+simple string _ceStyleStr    = ceStyle
+simple string _erlStyleStr   = erlStyle
+simple string _sweepStyleStr = sweepStyle
+simple string _smtStyleStr   = smtLineStyle
+simple string _obStyleStr    = obStyle
+simple string _labelSzStr    = labelSize
+
+f_cleanTicker(string sym) =>
+    parts = str.split(sym, ":")
+    parts.get(parts.size() - 1)
+
+f_tfLabel(string tf) =>
+    switch tf
+        "1"   => "1m"
+        "3"   => "3m"
+        "5"   => "5m"
+        "15"  => "15m"
+        "30"  => "30m"
+        "60"  => "1H"
+        "120" => "2H"
+        "240" => "4H"
+        "1D"  => "1D"
+        "1W"  => "1W"
+        => tf
+
+f_tablePosH(string v, string h) =>
+    switch h
+        "Left"   => v == "Top" ? position.top_left   : v == "Middle" ? position.middle_left   : position.bottom_left
+        "Centre" => v == "Top" ? position.top_center : v == "Middle" ? position.middle_center : position.bottom_center
+        =>          v == "Top" ? position.top_right  : v == "Middle" ? position.middle_right  : position.bottom_right
+
+f_timeFilterLabel() =>
+    if not enableTimeFilter
+        ""
+    else
+        array<string> sessions = array.new_string()
+        if enableFilter1 and str.length(str.trim(filter1Session)) > 0
+            sessions.push(str.trim(filter1Session))
+        if enableFilter2 and str.length(str.trim(filter2Session)) > 0
+            sessions.push(str.trim(filter2Session))
+        if enableFilter3 and str.length(str.trim(filter3Session)) > 0
+            sessions.push(str.trim(filter3Session))
+        if enableFilter4 and str.length(str.trim(filter4Session)) > 0
+            sessions.push(str.trim(filter4Session))
+        sessions.size() > 0 ? sessions.join(" | ") : ""
+
+var string s1Ticker = na
+var string s2Ticker = na
+
+var float[] obProjections = array.new<float>()
+var float   _minProj      = na
+
+if barstate.isfirst
+    s1Ticker := f_cleanTicker(resolvedSmtPair)
+    s2Ticker := f_cleanTicker(smtPair2)
+    for part in str.split(str.replace_all(obProjInput, " ", ""), ",")
+        v = str.tonumber(part)
+        if not na(v)
+            obProjections.push(v)
+    if obProjections.size() > 0
+        _minProj := obProjections.get(0)
+        for k = 1 to obProjections.size() - 1
+            _minProj := math.min(_minProj, obProjections.get(k))
+
+htfPivotH() =>
+    var float v = na
+    p = ta.pivothigh(high, 1, 1)
+    if not na(p)
+        v := p
+    v
+
+htfPivotL() =>
+    var float v = na
+    p = ta.pivotlow(low, 1, 1)
+    if not na(p)
+        v := p
+    v
+
+findPrice(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = (time - t0) / cspacer
+    if span > 0 and span < 5000
+        for j = 0 to span
+            if (useHigh ? high[j] : low[j]) == price
+                result := time[j]
+                break
+    result
+
+f_smtFindPrice(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = math.min((time - t0) / cspacer, 500)
+    if span > 0
+        for j = 0 to span
+            int lt = time[j]
+            if lt < t0
+                break
+            float p = useHigh ? high[j] : low[j]
+            if lt < t0 + htfMsec and p == price
+                result := lt
+                break
+    result
+
+f_findExtremeBar(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = math.min((time - t0) / cspacer, 5000)
+    if span > 0
+        for j = span to 0
+            int lt = time[j]
+            if lt >= t0
+                float p = useHigh ? high[j] : low[j]
+                if p == price
+                    result := lt
+                    break
+    result
+
+type SmtPair
+    float  anchorH
+    float  anchorL
+    float  bucketH
+    float  bucketL
+    bool   foundBull
+    bool   foundBear
+    line   lineBull
+    line   lineBear
+    label  labelBull
+    label  labelBear
+    string ticker
+    int    smtBullBar
+    int    smtBearBar
+
+type AnchorState
+    int      startTime
+    float    anchorH
+    float    anchorL
+    int      bucket
+    float    bucketH
+    float    bucketL
+    float    exH
+    float    exL
+    SmtPair  p1
+    SmtPair  p2
+
+type SwingPivot
+    float price
+    int   barTime
+
+type PivotTier
+    SwingPivot[] st
+    SwingPivot[] it
+    SwingPivot[] lt
+
+type AnchorPivot
+    float price
+    int   barTime
+    bool  swept
+
+type OrderBlock
+    float   openPrice
+    int     barTime
+    float   pivotPrice
+    int     pivotTime
+    float   scHigh
+    float   scLow
+    line    obLine
+    line    sweepLine
+    label   obLabel
+    line[]  projLines
+    label[] projLabels
+    float   slPrice
+    bool    active
+    float   targetPrice
+    bool    targetHit
+    bool    filled
+    float   erlPrice
+    line    erlLine
+    label   erlLabel
+    bool    erlHit
+    bool    frozen
+
+type FVG
+    box           bx
+    line          mid
+    label         lbl
+    float         hi
+    float         lo
+    bool          bull
+    bool          mitigated
+    float         erlLvl
+    float         pivotLvl
+    int           linkId
+    AnchorState[] anchors
+    PivotTier     pivotH
+    PivotTier     pivotL
+    AnchorPivot[] stHighAnc
+    AnchorPivot[] itHighAnc
+    AnchorPivot[] ltHighAnc
+    AnchorPivot[] stLowAnc
+    AnchorPivot[] itLowAnc
+    AnchorPivot[] ltLowAnc
+    OrderBlock[]  pendingBullOB
+    OrderBlock[]  pendingBearOB
+    OrderBlock[]  confirmedBullOB
+    OrderBlock[]  confirmedBearOB
+    bool          done
+    bool          fvgFrozen
+    bool          smtAlerted
+    bool          obAlerted
+
+type EntryRecord
+    OrderBlock ob
+    int        obBarTime
+
+var EntryRecord[] frozenEntries = array.new<EntryRecord>()
+
+f_deleteEntryPlots(OrderBlock ob) =>
+    if not na(ob.obLine)
+        ob.obLine.delete()
+        ob.obLine := na
+    if not na(ob.sweepLine)
+        ob.sweepLine.delete()
+        ob.sweepLine := na
+    if not na(ob.obLabel)
+        ob.obLabel.delete()
+        ob.obLabel := na
+    if not na(ob.erlLine)
+        ob.erlLine.delete()
+        ob.erlLine := na
+    if not na(ob.erlLabel)
+        ob.erlLabel.delete()
+        ob.erlLabel := na
+    if ob.projLines.size() > 0
+        for ln in ob.projLines
+            ln.delete()
+        ob.projLines.clear()
+    if ob.projLabels.size() > 0
+        for lb in ob.projLabels
+            lb.delete()
+        ob.projLabels.clear()
+
+f_registerFrozenEntry(OrderBlock ob) =>
+    frozenEntries.push(EntryRecord.new(ob, ob.barTime))
+    int n = frozenEntries.size()
+    if n > 1
+        for a = n - 1 to 1
+            ea = frozenEntries.get(a)
+            eb = frozenEntries.get(a - 1)
+            if ea.obBarTime < eb.obBarTime
+                frozenEntries.set(a,     eb)
+                frozenEntries.set(a - 1, ea)
+            else
+                break
+    while frozenEntries.size() > showHistory
+        evicted = frozenEntries.get(0)
+        f_deleteEntryPlots(evicted.ob)
+        frozenEntries.remove(0)
+
+f_removeFrozenEntry(int obBarTime) =>
+    if frozenEntries.size() > 0
+        for k = frozenEntries.size() - 1 to 0
+            if frozenEntries.get(k).obBarTime == obBarTime
+                frozenEntries.remove(k)
+                break
+
+var bool plotBullSL     = false
+var bool plotBearSL     = false
+var bool plotBullTarget = false
+var bool plotBearTarget = false
+var bool plotBullNofill = false
+var bool plotBearNofill = false
+var bool plotBullERL    = false
+var bool plotBearERL    = false
+
+var bool   fireSMTFVG      = false
+var bool   fireModelActive = false
+var bool   fireProjHit     = false
+var bool   fireERLHit      = false
+var string alertSmtMsg     = ""
+var string alertObMsg      = ""
+
+f_drawSmtLine(bool isBull, float anchorP, float currentP, int anchorT, int currentT) =>
+    int x1 = f_smtFindPrice(anchorP, anchorT, not isBull)
+    int x2 = f_findExtremeBar(currentP, currentT, not isBull)
+    line.new(x1, anchorP, x2, currentP, xloc=xloc.bar_time, color=smtColor, width=smtWidth, style=ls(_smtStyleStr))
+
+f_drawSmtLabel(bool isBull, line ln, string txt) =>
+    int   lx = line.get_x1(ln) + int((line.get_x2(ln) - line.get_x1(ln)) / 2)
+    float ly = (line.get_y1(ln) + line.get_y2(ln)) / 2
+    label.new(lx, ly, txt,
+              xloc=xloc.bar_time,
+              style=isBull ? label.style_label_up : label.style_label_down,
+              color=NO_COLOR, textcolor=smtColor, size=lsz(_labelSzStr),
+              text_font_family=font.family_monospace)
+
+f_updateSmtLine(bool isBull, float currentP, int currentT, line ln) =>
+    int x2 = f_findExtremeBar(currentP, currentT, not isBull)
+    line.set_x2(ln, x2)
+    line.set_y2(ln, currentP)
+
+f_linesMatch(line a, line b) =>
+    na(a) or na(b) ? false :
+     line.get_x1(a) == line.get_x1(b) and line.get_y1(a) == line.get_y1(b) and
+     line.get_x2(a) == line.get_x2(b) and line.get_y2(a) == line.get_y2(b)
+
+f_drawPair(SmtPair p, bool isBull, float anchorP, float extremeP, int anchorT, int currentT) =>
+    ln  = f_drawSmtLine(isBull, anchorP, extremeP, anchorT, currentT)
+    lbl = f_drawSmtLabel(isBull, ln, p.ticker)
+    if isBull
+        p.lineBull   := ln
+        p.labelBull  := lbl
+        p.foundBull  := true
+        p.smtBullBar := bar_index
+    else
+        p.lineBear   := ln
+        p.labelBear  := lbl
+        p.foundBear  := true
+        p.smtBearBar := bar_index
+
+f_syncLabels(bool isBull, SmtPair p1, SmtPair p2, string combinedTxt) =>
+    line  ln1    = isBull ? p1.lineBull : p1.lineBear
+    line  ln2    = isBull ? p2.lineBull : p2.lineBear
+    label _dummy = na
+    if not na(ln1) and not na(ln2)
+        merged = f_linesMatch(ln1, ln2)
+        line.set_color(ln2, merged ? NO_COLOR : smtColor)
+        lbl1 = isBull ? p1.labelBull : p1.labelBear
+        lbl2 = isBull ? p2.labelBull : p2.labelBear
+        if not na(lbl1)
+            lbl1.delete()
+        if not na(lbl2)
+            lbl2.delete()
+        newLbl1 = f_drawSmtLabel(isBull, ln1, merged ? combinedTxt : p1.ticker)
+        newLbl2 = merged ? na : f_drawSmtLabel(isBull, ln2, p2.ticker)
+        if isBull
+            p1.labelBull  := newLbl1
+            p2.labelBull  := newLbl2
+            p2.smtBullBar := merged ? p1.smtBullBar : p2.smtBullBar
+        else
+            p1.labelBear  := newLbl1
+            p2.labelBear  := newLbl2
+            p2.smtBearBar := merged ? p1.smtBearBar : p2.smtBearBar
+        _dummy := newLbl1
+    else if na(ln1) and not na(ln2)
+        lbl2 = isBull ? p2.labelBull : p2.labelBear
+        if not na(lbl2)
+            lbl2.delete()
+        newLbl2 = f_drawSmtLabel(isBull, ln2, p2.ticker)
+        if isBull
+            p2.labelBull := newLbl2
+        else
+            p2.labelBear := newLbl2
+        _dummy := newLbl2
+
+f_deleteSmtPairLine(SmtPair p, bool isBull) =>
+    ln  = isBull ? p.lineBull  : p.lineBear
+    lbl = isBull ? p.labelBull : p.labelBear
+    if not na(ln)
+        ln.delete()
+        if isBull
+            p.lineBull := na
+        else
+            p.lineBear := na
+    if not na(lbl)
+        lbl.delete()
+        if isBull
+            p.labelBull := na
+        else
+            p.labelBear := na
+
+f_resolveBestSmt(SmtPair p1, SmtPair p2, bool isBull) =>
+    line  ln1    = isBull ? p1.lineBull : p1.lineBear
+    line  ln2    = isBull ? p2.lineBull : p2.lineBear
+    int   bar1   = isBull ? p1.smtBullBar : p1.smtBearBar
+    int   bar2   = isBull ? p2.smtBullBar : p2.smtBearBar
+    bool  found1 = isBull ? p1.foundBull  : p1.foundBear
+    bool  found2 = isBull ? p2.foundBull  : p2.foundBear
+
+    float y2_1 = not na(ln1) ? line.get_y2(ln1) : float(na)
+    float y2_2 = not na(ln2) ? line.get_y2(ln2) : float(na)
+
+    bool merged = useSmtPair2 and found1 and found2 and not na(ln1) and not na(ln2) and f_linesMatch(ln1, ln2)
+
+    int   winBar  = na
+    line  winLine = na
+    float winY2   = float(na)
+
+    if merged
+        winBar  := bar1
+        winLine := ln1
+        winY2   := y2_1
+    else if useSmtPair2 and found1 and found2 and not na(ln1) and not na(ln2)
+        bool p1wins = isBull ? y2_1 < y2_2 : y2_1 > y2_2
+        if p1wins
+            winBar  := bar1
+            winLine := ln1
+            winY2   := y2_1
+            ln2.delete()
+            lbl2 = isBull ? p2.labelBull : p2.labelBear
+            if not na(lbl2)
+                lbl2.delete()
+        else
+            winBar  := bar2
+            winLine := ln2
+            winY2   := y2_2
+            ln1.delete()
+            lbl1 = isBull ? p1.labelBull : p1.labelBear
+            if not na(lbl1)
+                lbl1.delete()
+    else if found1 and not na(ln1)
+        winBar  := bar1
+        winLine := ln1
+        winY2   := y2_1
+    else if useSmtPair2 and found2 and not na(ln2)
+        winBar  := bar2
+        winLine := ln2
+        winY2   := y2_2
+
+    [winBar, winLine, winY2]
+
+f_promoteSwingLevel(SwingPivot[] src, SwingPivot[] dst, bool isHigh) =>
+    if src.size() > 2
+        float y1 = src.get(src.size() - 1).price
+        float y2 = src.get(src.size() - 2).price
+        float y3 = src.get(src.size() - 3).price
+        if isHigh ? (y1 < y2 and y2 > y3) : (y1 > y2 and y2 < y3)
+            cand = src.get(src.size() - 2)
+            if dst.size() == 0 or dst.last().price != cand.price
+                dst.push(SwingPivot.new(cand.price, cand.barTime))
+                src.remove(src.size() - 2)
+
+f_promoteAnc(AnchorPivot[] src, AnchorPivot[] dst, int barTime) =>
+    if src.size() > 0
+        for k = src.size() - 1 to 0
+            anc = src.get(k)
+            if anc.barTime == barTime and not anc.swept
+                src.remove(k)
+                dst.push(AnchorPivot.new(anc.price, anc.barTime, false))
+                break
+
+f_ictSwing(PivotTier tier,
+           AnchorPivot[] stAnc, AnchorPivot[] itAnc, AnchorPivot[] ltAnc,
+           bool isHigh, int hBars, int lBars) =>
+    float price = isHigh ? high[1] : low[1]
+    if (isHigh ? hBars : lBars) == -1
+        tier.st.push(SwingPivot.new(price, time[1]))
+        stAnc.push(AnchorPivot.new(price, time[1], false))
+    f_promoteSwingLevel(tier.st, tier.it, isHigh)
+    f_promoteSwingLevel(tier.it, tier.lt, isHigh)
+    if tier.st.size() > 2
+        sp = tier.st.get(tier.st.size() - 2)
+        if tier.it.size() > 0 and tier.it.last().barTime == sp.barTime
+            f_promoteAnc(stAnc, itAnc, sp.barTime)
+    if tier.it.size() > 2
+        sp = tier.it.get(tier.it.size() - 2)
+        if tier.lt.size() > 0 and tier.lt.last().barTime == sp.barTime
+            f_promoteAnc(itAnc, ltAnc, sp.barTime)
+
+f_cleanTier(AnchorPivot[] anchors, bool isBull) =>
+    if anchors.size() > 0
+        for j = anchors.size() - 1 to 0
+            anc = anchors.get(j)
+            if not anc.swept and (isBull ? low < anc.price : high > anc.price)
+                anc.swept := true
+            if anc.swept
+                anchors.remove(j)
+
+f_sweepTier(AnchorPivot[] anchors, OrderBlock[] pending, bool isBull) =>
+    int   bestIdx   = -1
+    float bestPrice = na
+    int   bestBar   = na
+    if anchors.size() > 0
+        for i = anchors.size() - 1 to 0
+            anc = anchors.get(i)
+            bool hit = isBull ? low < anc.price : high > anc.price
+            if not anc.swept and hit
+                anc.swept := true
+                if bestIdx == -1 or (isBull ? anc.price < bestPrice : anc.price > bestPrice)
+                    bestIdx := i, bestPrice := anc.price, bestBar := anc.barTime
+            if anc.swept
+                anchors.remove(i)
+        if bestIdx != -1
+            float candr = high - low
+            bool  ok    = candr > 0 and math.abs(close - open) * 100 / candr >= 50 and (isBull ? close < open : close > open)
+            if ok
+                pending.push(OrderBlock.new(open, time, bestPrice, bestBar, high, low,
+                                            na, na, na,
+                                            array.new<line>(), array.new<label>(),
+                                            float(na), true,
+                                            float(na), false,
+                                            false,
+                                            float(na), na, na, false, false))
+    bestIdx
+
+f_processSweeps(AnchorPivot[] ltAnc, AnchorPivot[] itAnc, AnchorPivot[] stAnc,
+                OrderBlock[] pending, bool isBull) =>
+    if f_sweepTier(ltAnc, pending, isBull) != -1
+        f_cleanTier(itAnc, isBull)
+        f_cleanTier(stAnc, isBull)
+    else if f_sweepTier(itAnc, pending, isBull) != -1
+        f_cleanTier(stAnc, isBull)
+    else
+        f_sweepTier(stAnc, pending, isBull)
+    bool(na)
+
+f_resolveObSL(bool isBull, float smtLineY2, float scH, float scL) =>
+    bool useSMT = obSLCalc == "SMT Based Invalidation" or (obSLCalc == "Automatic" and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("60"))
+    useSMT ? smtLineY2 : (isBull ? scL : scH)
+
+method deleteOB(OrderBlock self) =>
+    if not na(self.obLine)
+        self.obLine.delete()
+    if not na(self.sweepLine)
+        self.sweepLine.delete()
+    if not na(self.obLabel)
+        self.obLabel.delete()
+    if not na(self.erlLine)
+        self.erlLine.delete()
+    if not na(self.erlLabel)
+        self.erlLabel.delete()
+    if self.projLines.size() > 0
+        for ln in self.projLines
+            ln.delete()
+        self.projLines.clear()
+    if self.projLabels.size() > 0
+        for lb in self.projLabels
+            lb.delete()
+        self.projLabels.clear()
+
+f_hasActiveOB(OrderBlock[] obs) =>
+    bool found = false
+    if obs.size() > 0
+        for ob in obs
+            if ob.active and not ob.targetHit and not ob.frozen
+                found := true
+                break
+    found
+
+f_confirm(OrderBlock[] pending, OrderBlock[] confirmed, bool isBull, int winBar, line winLine, float winY2,
+          float erlLvlSnap, int t1Snap, int t2Snap,
+          SmtPair pa1, SmtPair pa2, SmtPair pb1, SmtPair pb2, SmtPair pc1, SmtPair pc2) =>
+    if pending.size() > 0
+        bool plotted = false
+        for i = 0 to pending.size() - 1
+            ob = pending.get(i)
+            bool confirmedBar = time > ob.barTime and (isBull ? close[1] > ob.openPrice : close[1] < ob.openPrice)
+            if confirmedBar and not na(winBar) and bar_index > winBar and not plotted
+                plotted   := true
+                color obColor = isBull ? bullOBColor : bearOBColor
+
+                ob.sweepLine := line.new(ob.pivotTime, ob.pivotPrice, ob.barTime, ob.pivotPrice,
+                                         xloc=xloc.bar_time, color=sweepLineCol, width=sweepWidth, style=ls(_sweepStyleStr))
+                ob.obLine    := line.new(ob.barTime, ob.openPrice, time + cspacer * 2, ob.openPrice,
+                                         xloc=xloc.bar_time, color=obColor, width=obWidth, style=ls(_obStyleStr))
+                ob.obLabel   := label.new(ob.barTime + cspacer, ob.openPrice, isBull ? "+ OB" : "- OB",
+                                          xloc=xloc.bar_time, style=label.style_label_left,
+                                          color=NO_COLOR, textcolor=obColor, size=size.small,
+                                          text_font_family=font.family_monospace)
+
+                float sl   = f_resolveObSL(isBull, winY2, ob.scHigh, ob.scLow)
+                ob.slPrice := sl
+                ob.active  := true
+                ob.frozen  := false
+
+                if obProjBool and obProjections.size() > 0 and not na(sl)
+                    float risk     = math.abs(ob.openPrice - sl)
+                    ob.targetPrice := isBull ? ob.openPrice + risk * _minProj : ob.openPrice - risk * _minProj
+                    for dv in obProjections
+                        float pp = isBull ? ob.openPrice + risk * dv : ob.openPrice - risk * dv
+                        pln = line.new(ob.barTime, pp, ob.barTime + cspacer * 2, pp,
+                                       xloc=xloc.bar_time, color=obColor, width=1)
+                        plb = label.new(ob.barTime + cspacer, pp, "+" + str.tostring(dv, "#.#"),
+                                        xloc=xloc.bar_time,
+                                        style=isBull ? label.style_label_down : label.style_label_up,
+                                        color=NO_COLOR, textcolor=obColor, size=size.small,
+                                        text_font_family=font.family_monospace)
+                        ob.projLines.push(pln)
+                        ob.projLabels.push(plb)
+
+                if isBull
+                    pa1.smtBullBar := na, pa2.smtBullBar := na
+                    pb1.smtBullBar := na, pb2.smtBullBar := na
+                    pc1.smtBullBar := na, pc2.smtBullBar := na
+                else
+                    pa1.smtBearBar := na, pa2.smtBearBar := na
+                    pb1.smtBearBar := na, pb2.smtBearBar := na
+                    pc1.smtBearBar := na, pc2.smtBearBar := na
+
+                ob.erlPrice := erlLvlSnap
+                if not na(erlLvlSnap)
+                    int erlX = isBull ? findPrice(erlLvlSnap, t1Snap, true) : findPrice(erlLvlSnap, t1Snap, false)
+                    if erlX == t1Snap
+                        erlX := isBull ? findPrice(erlLvlSnap, t2Snap, true) : findPrice(erlLvlSnap, t2Snap, false)
+                    ob.erlLine  := line.new(erlX, erlLvlSnap, time + cspacer * 2, erlLvlSnap,
+                                            xloc=xloc.bar_time, color=erlColor, width=erlWidth, style=ls(_erlStyleStr))
+                    ob.erlLabel := label.new(erlX, erlLvlSnap, "ERL",
+                                             xloc=xloc.bar_time,
+                                             style=isBull ? label.style_label_lower_right : label.style_label_upper_right,
+                                             color=NO_COLOR, textcolor=erlColor, size=lsz(_labelSzStr),
+                                             text_font_family=font.family_monospace)
+
+                confirmed.push(ob)
+
+        if plotted
+            for j = pending.size() - 1 to 0
+                ob = pending.get(j)
+                if ob.active
+                    pending.remove(j)
+        else
+            for i = pending.size() - 1 to 0
+                ob = pending.get(i)
+                if time > ob.barTime and (isBull ? close[1] > ob.openPrice : close[1] < ob.openPrice)
+                    pending.remove(i)
+
+f_checkOBInvalidation(OrderBlock[] obs, bool isBull) =>
+    bool triggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if ob.active and ob.filled and not ob.targetHit and not ob.frozen and not na(ob.slPrice)
+                bool invalidated = isBull ? low < ob.slPrice : high > ob.slPrice
+                if invalidated
+                    ob.deleteOB()
+                    f_removeFrozenEntry(ob.barTime)
+                    obs.remove(j)
+                    triggered := true
+    triggered
+
+f_checkOBFillAndTarget(OrderBlock[] obs, bool isBull) =>
+    bool tgtTriggered    = false
+    bool nofillTriggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if ob.active and not ob.targetHit and not ob.frozen
+                if not ob.filled
+                    bool fillHit = isBull ? low <= ob.openPrice : high >= ob.openPrice
+                    if fillHit
+                        ob.filled := true
+                if not na(ob.targetPrice)
+                    bool tgtHit = isBull ? high >= ob.targetPrice : low <= ob.targetPrice
+                    if tgtHit
+                        ob.targetHit := true
+                        ob.active    := false
+                        ob.frozen    := true
+                        f_registerFrozenEntry(ob)
+                        if ob.filled
+                            tgtTriggered    := true
+                        else
+                            nofillTriggered := true
+    [tgtTriggered, nofillTriggered]
+
+f_checkOBERL(OrderBlock[] obs, bool isBull) =>
+    bool triggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if not ob.erlHit and not na(ob.erlPrice) and not ob.frozen
+                bool erlHitNow = isBull ? high >= ob.erlPrice : low <= ob.erlPrice
+                if erlHitNow
+                    ob.erlHit := true
+                    if not na(ob.erlLine)
+                        line.set_x2(ob.erlLine, time)
+                    triggered := true
+    triggered
+
+method deleteAnchor(AnchorState self) =>
+    if not na(self.p1.lineBull)
+        self.p1.lineBull.delete()
+    if not na(self.p1.lineBear)
+        self.p1.lineBear.delete()
+    if not na(self.p1.labelBull)
+        self.p1.labelBull.delete()
+    if not na(self.p1.labelBear)
+        self.p1.labelBear.delete()
+    if not na(self.p2.lineBull)
+        self.p2.lineBull.delete()
+    if not na(self.p2.lineBear)
+        self.p2.lineBear.delete()
+    if not na(self.p2.labelBull)
+        self.p2.labelBull.delete()
+    if not na(self.p2.labelBear)
+        self.p2.labelBear.delete()
+
+f_inv1H(float h, float l) => inverse1 ? 1.0 / l : h
+f_inv1L(float h, float l) => inverse1 ? 1.0 / h : l
+f_inv2H(float h, float l) => inverse2 ? 1.0 / l : h
+f_inv2L(float h, float l) => inverse2 ? 1.0 / h : l
+
+f_processAnchor(AnchorState a, bool isBull, float curH, float curL, float s1H, float s1L, float s2H, float s2L) =>
+    if time >= a.startTime and not na(a.anchorH)
+        string combinedTicker = s1Ticker + "+" + s2Ticker
+        int    currentBucket  = math.floor((time - a.startTime) / htfMsec) * htfMsec + a.startTime
+
+        if na(a.bucket) or currentBucket != a.bucket
+            a.bucket     := currentBucket
+            a.bucketH    := curH
+            a.bucketL    := curL
+            a.p1.bucketH := s1H
+            a.p1.bucketL := s1L
+            a.p2.bucketH := s2H
+            a.p2.bucketL := s2L
+        else
+            if curH > a.bucketH
+                a.bucketH := curH
+            if curL < a.bucketL
+                a.bucketL := curL
+            a.p1.bucketH := math.max(a.p1.bucketH, s1H)
+            a.p1.bucketL := math.min(a.p1.bucketL, s1L)
+            a.p2.bucketH := math.max(a.p2.bucketH, s2H)
+            a.p2.bucketL := math.min(a.p2.bucketL, s2L)
+
+        if isBull
+            if not na(a.p1.anchorL)
+                if not a.p1.foundBull and (a.bucketL - a.anchorL) * (a.p1.bucketL - a.p1.anchorL) < 0
+                    f_drawPair(a.p1, true, a.anchorL, a.bucketL, a.startTime, a.bucket)
+            if useSmtPair2 and not na(a.p2.anchorL)
+                if not a.p2.foundBull and (a.bucketL - a.anchorL) * (a.p2.bucketL - a.p2.anchorL) < 0
+                    f_drawPair(a.p2, true, a.anchorL, a.bucketL, a.startTime, a.bucket)
+                    f_syncLabels(true, a.p1, a.p2, combinedTicker)
+        else
+            if not na(a.p1.anchorH)
+                if not a.p1.foundBear and (a.bucketH - a.anchorH) * (a.p1.bucketH - a.p1.anchorH) < 0
+                    f_drawPair(a.p1, false, a.anchorH, a.bucketH, a.startTime, a.bucket)
+            if useSmtPair2 and not na(a.p2.anchorH)
+                if not a.p2.foundBear and (a.bucketH - a.anchorH) * (a.p2.bucketH - a.p2.anchorH) < 0
+                    f_drawPair(a.p2, false, a.anchorH, a.bucketH, a.startTime, a.bucket)
+                    f_syncLabels(false, a.p1, a.p2, combinedTicker)
+
+        if a.p1.foundBull or a.p1.foundBear or (useSmtPair2 and (a.p2.foundBull or a.p2.foundBear))
+            if na(a.exH)
+                a.exH := high
+                a.exL := low
+            else
+                if high > a.exH
+                    a.exH := high
+                    if not isBull
+                        if not na(a.p1.lineBear)
+                            if (a.exH - a.anchorH) * (s1H - a.p1.anchorH) < 0
+                                f_updateSmtLine(false, a.exH, currentBucket, a.p1.lineBear)
+                                a.p1.smtBearBar := bar_index
+                                if useSmtPair2 and a.p2.foundBear
+                                    f_syncLabels(false, a.p1, a.p2, combinedTicker)
+                                else
+                                    if not na(a.p1.labelBear)
+                                        a.p1.labelBear.delete()
+                                    a.p1.labelBear := f_drawSmtLabel(false, a.p1.lineBear, a.p1.ticker)
+                            else
+                                a.p1.smtBearBar := na
+                        if useSmtPair2 and not na(a.p2.lineBear)
+                            if (a.exH - a.anchorH) * (s2H - a.p2.anchorH) < 0
+                                f_updateSmtLine(false, a.exH, currentBucket, a.p2.lineBear)
+                                a.p2.smtBearBar := bar_index
+                                f_syncLabels(false, a.p1, a.p2, combinedTicker)
+                            else
+                                a.p2.smtBearBar := na
+
+                if low < a.exL
+                    a.exL := low
+                    if isBull
+                        if not na(a.p1.lineBull)
+                            if (a.exL - a.anchorL) * (s1L - a.p1.anchorL) < 0
+                                f_updateSmtLine(true, a.exL, currentBucket, a.p1.lineBull)
+                                a.p1.smtBullBar := bar_index
+                                if useSmtPair2 and a.p2.foundBull
+                                    f_syncLabels(true, a.p1, a.p2, combinedTicker)
+                                else
+                                    if not na(a.p1.labelBull)
+                                        a.p1.labelBull.delete()
+                                    a.p1.labelBull := f_drawSmtLabel(true, a.p1.lineBull, a.p1.ticker)
+                            else
+                                a.p1.smtBullBar := na
+                        if useSmtPair2 and not na(a.p2.lineBull)
+                            if (a.exL - a.anchorL) * (s2L - a.p2.anchorL) < 0
+                                f_updateSmtLine(true, a.exL, currentBucket, a.p2.lineBull)
+                                a.p2.smtBullBar := bar_index
+                                f_syncLabels(true, a.p1, a.p2, combinedTicker)
+                            else
+                                a.p2.smtBullBar := na
+    float(na)
+
+f_crossAnchorResolve(FVG f, bool isBull) =>
+    [wBar0, wLine0, wY2_0] = f_resolveBestSmt(f.anchors.get(0).p1, f.anchors.get(0).p2, isBull)
+    [wBar1, wLine1, wY2_1] = f_resolveBestSmt(f.anchors.get(1).p1, f.anchors.get(1).p2, isBull)
+    [wBar2, wLine2, wY2_2] = f_resolveBestSmt(f.anchors.get(2).p1, f.anchors.get(2).p2, isBull)
+
+    float best = na
+    if not na(wY2_0)
+        best := wY2_0
+    if not na(wY2_1)
+        best := na(best) ? wY2_1 : (isBull ? math.min(best, wY2_1) : math.max(best, wY2_1))
+    if not na(wY2_2)
+        best := na(best) ? wY2_2 : (isBull ? math.min(best, wY2_2) : math.max(best, wY2_2))
+
+    bool keep0 = not na(wY2_0) and not na(best) and (isBull ? wY2_0 <= best : wY2_0 >= best)
+    bool keep1 = not na(wY2_1) and not na(best) and (isBull ? wY2_1 <= best : wY2_1 >= best)
+    bool keep2 = not na(wY2_2) and not na(best) and (isBull ? wY2_2 <= best : wY2_2 >= best)
+
+    if not keep0
+        f_deleteSmtPairLine(f.anchors.get(0).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(0).p2, isBull)
+    if not keep1
+        f_deleteSmtPairLine(f.anchors.get(1).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(1).p2, isBull)
+    if not keep2
+        f_deleteSmtPairLine(f.anchors.get(2).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(2).p2, isBull)
+
+    int   winBar  = na
+    line  winLine = na
+    float winY2   = float(na)
+    if keep0
+        winBar := wBar0, winLine := wLine0, winY2 := wY2_0
+    if keep1 and (na(winBar) or (isBull ? wY2_1 <= winY2 : wY2_1 >= winY2))
+        winBar := wBar1, winLine := wLine1, winY2 := wY2_1
+    if keep2 and (na(winBar) or (isBull ? wY2_2 <= winY2 : wY2_2 >= winY2))
+        winBar := wBar2, winLine := wLine2, winY2 := wY2_2
+
+    [winBar, winLine, winY2]
+
+method delete(FVG self) =>
+    self.bx.delete()
+    self.mid.delete()
+    self.lbl.delete()
+    for a in self.anchors
+        a.deleteAnchor()
+    for ob in self.pendingBullOB
+        ob.deleteOB()
+    for ob in self.pendingBearOB
+        ob.deleteOB()
+    for ob in self.confirmedBullOB
+        ob.deleteOB()
+    for ob in self.confirmedBearOB
+        ob.deleteOB()
+
+method removeFVG(FVG[] self, int i) =>
+    self.get(i).delete()
+    self.remove(i)
+
+method beyondFVG(FVG self, float c) => self.bull ? c < self.lo : c > self.hi
+method inFVG(FVG self, float h, float l) => self.bull ? l < self.hi : h > self.lo
+
+// ── HTF data ──────────────────────────────────────────────────────────────────
+[h1, h2, h3, l1, l2, l3, t1, t2] = request.security(syminfo.tickerid, resolvedHTF,
+     [high[1], high[2], high[3], low[1], low[2], low[3], time[1], time[2]],
+     lookahead=barmerge.lookahead_on)
+
+[t3, htfClose1, tfTime, htfPH, htfPL] = request.security(syminfo.tickerid, resolvedHTF,
+     [time[3], close[1], time, htfPivotH(), htfPivotL()],
+     lookahead=barmerge.lookahead_on)
+
+[s1_h1, s1_h2, s1_h3, s1_l1, s1_l2, s1_l3, smt1H_raw, smt1L_raw] = request.security(resolvedSmtPair, resolvedHTF,
+     [high[1], high[2], high[3], low[1], low[2], low[3], high, low],
+     lookahead=barmerge.lookahead_on)
+
+float smt1H = f_inv1H(smt1H_raw, smt1L_raw)
+float smt1L = f_inv1L(smt1H_raw, smt1L_raw)
+
+var float s2_h1 = na, var float s2_h2 = na, var float s2_h3 = na
+var float s2_l1 = na, var float s2_l2 = na, var float s2_l3 = na
+var float smt2H = na, var float smt2L = na
+if useSmtPair2
+    [_a, _b, _c, _d, _e, _f, _g, _h] = request.security(smtPair2, resolvedHTF,
+         [high[1], high[2], high[3], low[1], low[2], low[3], high, low],
+         lookahead=barmerge.lookahead_on)
+    s2_h1 := _a, s2_h2 := _b, s2_h3 := _c, s2_l1 := _d, s2_l2 := _e, s2_l3 := _f
+    smt2H := f_inv2H(_g, _h)
+    smt2L := f_inv2L(_g, _h)
+
+max_bars_back(high, 1000)
+max_bars_back(low,  1000)
+max_bars_back(time, 1000)
+
+newHTFBar = ta.change(tfTime) != 0
+
+var float liveHigh = na, var float liveLow = na
+if newHTFBar
+    liveHigh := high, liveLow := low
+else
+    if high > liveHigh
+        liveHigh := high
+    if low < liveLow
+        liveLow := low
+
+int _hBars = ta.highestbars(3)
+int _lBars = ta.lowestbars(3)
+
+var FVG[] fvgs = array.new<FVG>()
+
+f_makeAnchorState(int sTime, float aH, float aL, float p1H, float p1L, float p2H, float p2L) =>
+    SmtPair p1 = SmtPair.new(p1H, p1L, na, na, false, false, na, na, na, na, s1Ticker, na, na)
+    SmtPair p2 = SmtPair.new(p2H, p2L, na, na, false, false, na, na, na, na, s2Ticker, na, na)
+    AnchorState.new(sTime, aH, aL, na, na, na, na, na, p1, p2)
+
+f_makeAnchors() =>
+    AnchorState[] anchors = array.new<AnchorState>()
+    anchors.push(f_makeAnchorState(int(t1), h1, l1,
+                 f_inv1H(s1_h1, s1_l1), f_inv1L(s1_h1, s1_l1),
+                 f_inv2H(s2_h1, s2_l1), f_inv2L(s2_h1, s2_l1)))
+    anchors.push(f_makeAnchorState(int(t2), h2, l2,
+                 f_inv1H(s1_h2, s1_l2), f_inv1L(s1_h2, s1_l2),
+                 f_inv2H(s2_h2, s2_l2), f_inv2L(s2_h2, s2_l2)))
+    anchors.push(f_makeAnchorState(int(t3), h3, l3,
+                 f_inv1H(s1_h3, s1_l3), f_inv1L(s1_h3, s1_l3),
+                 f_inv2H(s2_h3, s2_l3), f_inv2L(s2_h3, s2_l3)))
+    anchors
+
+// ── Backfill pivot anchors from t3 to now on FVG creation ────────────────────
+// Scans LTF bars back to t3 (open of the oldest HTF candle in the FVG),
+// identifies swing highs/lows using a 1-bar neighbour comparison,
+// and seeds the FVG's AnchorPivot arrays at the ST tier so that f_ictSwing
+// can promote them to IT/LT on subsequent bars.
+f_seedPivots(AnchorPivot[] stH, AnchorPivot[] stL, int seedFromTime) =>
+    // Arrays are freshly created at each pushFVG call — no dup check needed
+    int span = math.min((time - seedFromTime) / cspacer, 500)
+    if span >= 2
+        for j = span - 1 to 1
+            int bt = time[j]
+            if bt >= seedFromTime
+                float h_prev = high[j + 1]
+                float h_cur  = high[j]
+                float h_next = high[j - 1]
+                float l_prev = low[j + 1]
+                float l_cur  = low[j]
+                float l_next = low[j - 1]
+                if h_cur > h_prev and h_cur > h_next
+                    stH.push(AnchorPivot.new(h_cur, bt, false))
+                if l_cur < l_prev and l_cur < l_next
+                    stL.push(AnchorPivot.new(l_cur, bt, false))
+
+pushFVG(bool isBull) =>
+    float top    = isBull ? l1 : l3
+    float bot    = isBull ? h3 : h1
+    float fmid   = (top + bot) / 2
+    int   ltX    = isBull ? findPrice(h3, int(t3), true)  : findPrice(l3, int(t3), false)
+    int   rtX    = isBull ? findPrice(l1, int(t1), false) : findPrice(h1, int(t1), true)
+    float erl    = isBull ? math.max(h1, h2) : math.min(l1, l2)
+    float pivLvl = isBull ? (not na(htfPL) and htfPL < bot ? htfPL : float(na))
+                          : (not na(htfPH) and htfPH > top ? htfPH : float(na))
+    int   lblX   = ltX + int((rtX - ltX) * 0.75)
+
+    bx      = box.new(ltX, top, rtX, bot, xloc=xloc.bar_time, bgcolor=fvgCol, border_color=NO_COLOR, border_width=0)
+    midLine = line.new(ltX, fmid, rtX, fmid, xloc=xloc.bar_time, color=showCE ? ceColor : NO_COLOR, style=ls(_ceStyleStr), width=ceWidth)
+    lbl     = label.new(lblX, isBull ? bot : top, isBull ? "+ FVG" : "- FVG",
+                        xloc=xloc.bar_time,
+                        style=isBull ? label.style_label_upper_left : label.style_label_lower_left,
+                        textcolor=color.new(#787b86, 0), color=NO_COLOR, size=lsz(_labelSzStr),
+                        text_font_family=font.family_monospace)
+
+    // Fresh per-FVG pivot tiers and anchor arrays
+    PivotTier     newPivH = PivotTier.new(array.new<SwingPivot>(), array.new<SwingPivot>(), array.new<SwingPivot>())
+    PivotTier     newPivL = PivotTier.new(array.new<SwingPivot>(), array.new<SwingPivot>(), array.new<SwingPivot>())
+    AnchorPivot[] newStH  = array.new<AnchorPivot>()
+    AnchorPivot[] newItH  = array.new<AnchorPivot>()
+    AnchorPivot[] newLtH  = array.new<AnchorPivot>()
+    AnchorPivot[] newStL  = array.new<AnchorPivot>()
+    AnchorPivot[] newItL  = array.new<AnchorPivot>()
+    AnchorPivot[] newLtL  = array.new<AnchorPivot>()
+
+    // ── Seed pivots from t3 so the FVG already has swing context ─────────────
+    // t3 is the open timestamp of the oldest HTF bar that contributed to this FVG.
+    // Any swing pivot whose bar opened at or after t3 is valid context.
+    f_seedPivots(newStH, newStL, int(t3))
+
+    fvgs.push(FVG.new(
+         bx, midLine, lbl, top, bot, isBull, false, erl, pivLvl, bar_index,
+         f_makeAnchors(),
+         newPivH, newPivL,
+         newStH, newItH, newLtH,
+         newStL, newItL, newLtL,
+         array.new<OrderBlock>(), array.new<OrderBlock>(),
+         array.new<OrderBlock>(), array.new<OrderBlock>(),
+         false, false, false, false))
+
+if validTF and newHTFBar
+    if l1 > h3 and (bias == "Neutral" or bias == "Bullish")
+        pushFVG(true)
+    if h1 < l3 and (bias == "Neutral" or bias == "Bearish")
+        pushFVG(false)
+
+plotBullSL     := false
+plotBearSL     := false
+plotBullTarget := false
+plotBearTarget := false
+plotBullNofill := false
+plotBearNofill := false
+plotBullERL    := false
+plotBearERL    := false
+
+fireSMTFVG      := false
+fireModelActive := false
+fireProjHit     := false
+fireERLHit      := false
+alertSmtMsg     := ""
+alertObMsg      := ""
+
+int i = 0
+while i < fvgs.size()
+    FVG  f       = fvgs.get(i)
+    bool deleted = false
+
+    bool bullTradeActive = f_hasActiveOB(f.confirmedBullOB)
+    bool bearTradeActive = f_hasActiveOB(f.confirmedBearOB)
+    bool anyTradeActive  = bullTradeActive or bearTradeActive
+
+    if not f.fvgFrozen
+        if newHTFBar and not anyTradeActive
+            if f.beyondFVG(htfClose1)
+                fvgs.removeFVG(i)
+                deleted := true
+
+        if not deleted
+            if not anyTradeActive
+                if not f.mitigated
+                    f.erlLvl := f.bull ? math.max(f.erlLvl, liveHigh) : math.min(f.erlLvl, liveLow)
+                if not f.mitigated and f.inFVG(liveHigh, liveLow)
+                    f.mitigated := true
+                if f.mitigated and (f.bull ? liveHigh > f.erlLvl : liveLow < f.erlLvl)
+                    fvgs.removeFVG(i)
+                    deleted := true
+                if not deleted and not na(f.pivotLvl) and (f.bull ? liveLow < f.pivotLvl : liveHigh > f.pivotLvl)
+                    fvgs.removeFVG(i)
+                    deleted := true
+
+    if not deleted
+        if not f.done
+            for a in f.anchors
+                f_processAnchor(a, f.bull, high, low, smt1H, smt1L, smt2H, smt2L)
+
+            [wBarBull, wLineBull, wY2Bull] = f_crossAnchorResolve(f, true)
+            [wBarBear, wLineBear, wY2Bear] = f_crossAnchorResolve(f, false)
+
+            f_ictSwing(f.pivotH, f.stHighAnc, f.itHighAnc, f.ltHighAnc, true,  _hBars, _lBars)
+            f_ictSwing(f.pivotL, f.stLowAnc,  f.itLowAnc,  f.ltLowAnc,  false, _hBars, _lBars)
+
+            if f.bull
+                f_processSweeps(f.ltLowAnc,  f.itLowAnc,  f.stLowAnc,  f.pendingBullOB, true)
+                f_confirm(f.pendingBullOB, f.confirmedBullOB, true, wBarBull, wLineBull, wY2Bull,
+                          f.erlLvl, f.anchors.get(0).startTime, f.anchors.get(1).startTime,
+                          f.anchors.get(0).p1, f.anchors.get(0).p2,
+                          f.anchors.get(1).p1, f.anchors.get(1).p2,
+                          f.anchors.get(2).p1, f.anchors.get(2).p2)
+            else
+                f_processSweeps(f.ltHighAnc, f.itHighAnc, f.stHighAnc, f.pendingBearOB, false)
+                f_confirm(f.pendingBearOB, f.confirmedBearOB, false, wBarBear, wLineBear, wY2Bear,
+                          f.erlLvl, f.anchors.get(0).startTime, f.anchors.get(1).startTime,
+                          f.anchors.get(0).p1, f.anchors.get(0).p2,
+                          f.anchors.get(1).p1, f.anchors.get(1).p2,
+                          f.anchors.get(2).p1, f.anchors.get(2).p2)
+
+        for ob in f.confirmedBullOB
+            if not ob.frozen
+                if not na(ob.obLine) and not ob.filled and not ob.targetHit
+                    line.set_x2(ob.obLine, time + cspacer * 2)
+                    if not na(ob.obLabel)
+                        label.set_x(ob.obLabel, time + cspacer * 2)
+                if not na(ob.erlLine) and not ob.erlHit
+                    line.set_x2(ob.erlLine, time + cspacer * 2)
+        for ob in f.confirmedBearOB
+            if not ob.frozen
+                if not na(ob.obLine) and not ob.filled and not ob.targetHit
+                    line.set_x2(ob.obLine, time + cspacer * 2)
+                    if not na(ob.obLabel)
+                        label.set_x(ob.obLabel, time + cspacer * 2)
+                if not na(ob.erlLine) and not ob.erlHit
+                    line.set_x2(ob.erlLine, time + cspacer * 2)
+
+        if f.bull
+            [bullTgt, bullNofill] = f_checkOBFillAndTarget(f.confirmedBullOB, true)
+            if bullTgt
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBullTarget := true
+                fireProjHit    := true
+            if bullNofill
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBullNofill := true
+            if f_checkOBERL(f.confirmedBullOB, true)
+                plotBullERL := true
+                fireERLHit  := true
+            if not f.fvgFrozen
+                if f_checkOBInvalidation(f.confirmedBullOB, true)
+                    plotBullSL := true
+        else
+            [bearTgt, bearNofill] = f_checkOBFillAndTarget(f.confirmedBearOB, false)
+            if bearTgt
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBearTarget := true
+                fireProjHit    := true
+            if bearNofill
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBearNofill := true
+            if f_checkOBERL(f.confirmedBearOB, false)
+                plotBearERL := true
+                fireERLHit  := true
+            if not f.fvgFrozen
+                if f_checkOBInvalidation(f.confirmedBearOB, false)
+                    plotBearSL := true
+
+        if not f.smtAlerted and not f.done
+            bool smtNowFound = false
+            for a in f.anchors
+                if (f.bull ? a.p1.foundBull : a.p1.foundBear) or (useSmtPair2 and (f.bull ? a.p2.foundBull : a.p2.foundBear))
+                    smtNowFound := true
+                    break
+            if smtNowFound
+                f.smtAlerted := true
+                fireSMTFVG   := true
+                alertSmtMsg  := (f.bull ? "+ " : "- ") + f_tfLabel(resolvedLTF) + " FVG and SMT formed, waiting for Entry"
+
+        if not f.obAlerted
+            bool obNowActive = f_hasActiveOB(f.bull ? f.confirmedBullOB : f.confirmedBearOB)
+            if obNowActive
+                f.obAlerted     := true
+                fireModelActive := true
+                alertObMsg      := "FVG + SMT Model Active " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF)
+
+        i += 1
+
+while fvgs.size() > MAX_FVGS
+    fvgs.removeFVG(0)
+
+_shapeInvalid = invalidShape == "x" ? shape.xcross : invalidShape == "+" ? shape.cross : shape.diamond
+_shapeTarget  = targetShape  == "x" ? shape.xcross : targetShape  == "+" ? shape.cross : shape.diamond
+_shapeNofill  = nofillShape  == "x" ? shape.xcross : nofillShape  == "+" ? shape.cross : shape.diamond
+_shapeERL     = erlShape     == "x" ? shape.xcross : erlShape     == "+" ? shape.cross : shape.diamond
+
+plotshape(showInvalid    and plotBullSL,     title="Bull SL",      style=_shapeInvalid, location=location.belowbar, color=bullInvalidCol, size=size.auto)
+plotshape(showInvalid    and plotBearSL,     title="Bear SL",      style=_shapeInvalid, location=location.abovebar, color=bearInvalidCol, size=size.auto)
+plotshape(showTargetMark and plotBullTarget, title="Bull Target",  style=_shapeTarget,  location=location.abovebar, color=bullTargetCol,  size=size.auto)
+plotshape(showTargetMark and plotBearTarget, title="Bear Target",  style=_shapeTarget,  location=location.belowbar, color=bearTargetCol,  size=size.auto)
+plotshape(showNofill     and plotBullNofill, title="Bull No Fill", style=_shapeNofill,  location=location.abovebar, color=bullNofillCol,  size=size.auto)
+plotshape(showNofill     and plotBearNofill, title="Bear No Fill", style=_shapeNofill,  location=location.belowbar, color=bearNofillCol,  size=size.auto)
+plotshape(showERLMarker  and plotBullERL,    title="Bull ERL",     style=_shapeERL,     location=location.abovebar, color=bullERLCol,     size=size.auto)
+plotshape(showERLMarker  and plotBearERL,    title="Bear ERL",     style=_shapeERL,     location=location.belowbar, color=bearERLCol,     size=size.auto)
+
+if enableAlerts
+    if alertSMTFVG      and fireSMTFVG      and str.length(alertSmtMsg) > 0
+        alert(alertSmtMsg, alert.freq_once_per_bar)
+    if alertModelActive and fireModelActive and str.length(alertObMsg) > 0
+        alert(alertObMsg, alert.freq_once_per_bar)
+    if alertProjHit     and fireProjHit
+        alert("FVG + SMT — Projection Target Hit " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF), alert.freq_once_per_bar)
+    if alertERLHit      and fireERLHit
+        alert("FVG + SMT — External Range Liquidity Hit " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF), alert.freq_once_per_bar)
+
+var table infoTable = na
+if barstate.islast and boolTable
+    tfStr        = f_timeFilterLabel()
+    string p1tag = _smtAutoFound ? " (auto)" : ""
+    string p2tag = useSmtPair2   ? " / " + f_cleanTicker(smtPair2) + " (2nd)" : ""
+    pairStr      = syminfo.ticker + " / " + f_cleanTicker(resolvedSmtPair) + p1tag + p2tag
+    bool   showWarning = autoSMT and not _smtAutoFound
+    string warnMsg     = "⚠ No auto SMT for '" + syminfo.ticker + "' — using " + f_cleanTicker(smtPair) + " (manual)"
+
+    int rowCount = 1
+    if biasInfo or alignmentInfo or (timeInfo and str.length(tfStr) > 0)
+        rowCount += 1
+    if dateInfo
+        rowCount += 1
+    if showWarning
+        rowCount += 1
+
+    if not na(infoTable)
+        table.delete(infoTable)
+    infoTable := table.new(f_tablePosH(tableloc1, tableloc2), 2, rowCount,
+                  bgcolor=color.new(color.black, 100), border_color=color.new(#1a1a1a, 0),
+                  border_width=1, frame_color=color.new(#1a1a1a, 0), frame_width=1)
+
+    textCol = color.new(#1a1a1a, 0)
+    bgColor = color.new(color.black, 100)
+
+    table.cell(infoTable, 0, 0, "Forever Model (" + f_tfLabel(resolvedLTF) + " - " + f_tfLabel(resolvedHTF) + ")",
+               text_color=textCol, bgcolor=bgColor, text_size=size.normal,
+               text_halign=text.align_center, text_font_family=font.family_monospace)
+    table.cell(infoTable, 1, 0, "", text_color=textCol, bgcolor=bgColor, text_size=size.normal,
+               text_halign=text.align_center, text_font_family=font.family_monospace)
+    table.merge_cells(infoTable, 0, 0, 1, 0)
+
+    int currentRow = 1
+    if biasInfo or alignmentInfo or (timeInfo and str.length(tfStr) > 0)
+        biasColor = bias == "Bullish" ? color.new(#00c853, 0) : bias == "Bearish" ? color.new(#d50000, 0) : textCol
+        biasLine  = biasInfo ? "Bias : " + bias : ""
+        timeLine  = (timeInfo and str.length(tfStr) > 0) ? tfStr : ""
+        combined  = biasLine + (biasLine != "" ? "\n\n" : "") + pairStr + (timeLine != "" ? "\n\n" : "") + timeLine
+        table.cell(infoTable, 0, currentRow, combined,
+                   text_color=biasColor, bgcolor=bgColor, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.cell(infoTable, 1, currentRow, "", text_color=textCol, bgcolor=bgColor, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.merge_cells(infoTable, 0, currentRow, 1, currentRow)
+        currentRow += 1
+
+    if dateInfo
+        table.cell(infoTable, 0, currentRow, str.format_time(time_close, "dd MMM yyyy", syminfo.timezone),
+                   text_color=textCol, bgcolor=bgColor, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.cell(infoTable, 1, currentRow, "", text_color=textCol, bgcolor=bgColor, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.merge_cells(infoTable, 0, currentRow, 1, currentRow)
+        currentRow += 1
+
+    if showWarning
+        warnBg  = color.new(#cc0000, 0)
+        warnTxt = color.new(color.white, 0)
+        table.cell(infoTable, 0, currentRow, warnMsg,
+                   text_color=warnTxt, bgcolor=warnBg, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.cell(infoTable, 1, currentRow, "", text_color=warnTxt, bgcolor=warnBg, text_size=size.small,
+                   text_halign=text.align_center, text_font_family=font.family_monospace)
+        table.merge_cells(infoTable, 0, currentRow, 1, currentRow)
