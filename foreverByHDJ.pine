@@ -1,0 +1,2237 @@
+//@version=6
+indicator("Forever Pro°", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+grpalerts        = "ALERTS SETTINGS"
+enableAlerts     = input.bool(true,  "Alerts?",                       group=grpalerts)
+alertSMTFVG      = input.bool(true,  "SMT & FVG Tagged?",             group=grpalerts, active=enableAlerts)
+alertModelActive = input.bool(true,  "Model Active?",                 group=grpalerts, active=enableAlerts)
+alertProjHit     = input.bool(false, "Orderblock Projection Hit?",    group=grpalerts, active=enableAlerts)
+alertERLHit      = input.bool(false, "External Range Liquidity Hit?", group=grpalerts, active=enableAlerts)
+
+grpgen         = "GENERAL SETTINGS"
+showHistory    = input.int(1,    "History",                     group=grpgen, minval=1, tooltip="Number of setups to keep visible. Active trades always shown.")
+discardInvalid = input.bool(true, "Discard Invalidated History", group=grpgen, tooltip="When enabled, stopped-out (failed) trades are completely removed. If disabled, they turn gray.")
+bias           = input.string("Neutral",   "Bias",               group=grpgen, options=["Neutral","Bullish","Bearish"])
+modelType   = input.string("Auto",      "Timeframe Alignment",group=grpgen, options=["Auto","1m-15m","3m-30m","5m-1H","15m-4H","1H-1D","4H-1W","1D-1W","6H-15m","90M-5m","Custom"])
+customLTF   = input.timeframe("5",  "Custom LTF                      ", group=grpgen, inline="custom", active=modelType=="Custom")
+customHTF   = input.timeframe("60", "",                                   group=grpgen, inline="custom", tooltip="Only active when Alignment is set to Custom", active=modelType=="Custom")
+obSLCalc    = input.string("Automatic","OB Invalidation",     group=grpgen, options=["Automatic","OB High Low","SMT Based Invalidation"], tooltip="Automatic uses SMT-based SL below 1H, OB High/Low on 1H and above.")
+obProjBool  = input.bool(true,  "",               group=grpgen, inline="proj")
+obProjInput = input.string("1, 2","OB Projections",group=grpgen, inline="proj")
+projCalc    = input.string("Confirmation Close", "Projection Calculation", group=grpgen, options=["Breaker Range", "Confirmation Close"], tooltip="Breaker Range calculates targets from the OB line. Confirmation Close calculates targets from the closing price of the breakout candle.")
+
+grp_po3_main       = "PO3° SETTINGS"
+enable_po3         = input.bool(true, "PO3 Candles", group = grp_po3_main)
+po3_tf             = input.timeframe('', 'Timeframe', inline = 'po3_tf', group = grp_po3_main, active = enable_po3)
+po3_tf_auto        = input.bool(true, 'Set Automatically', inline = 'po3_tf', group = grp_po3_main, active = enable_po3)
+po3_num            = input.int(1, 'Number of HTF Candles', minval = 1, group = grp_po3_main, active = enable_po3)
+po3_offset         = input.int(15, 'Offset', group = grp_po3_main, active = enable_po3)
+po3_size           = input.string('Medium', 'Size', options = ['Small', 'Medium', 'Large'], group = grp_po3_main, active = enable_po3)
+po3_margin         = input.int(1, 'Margin', minval = 1, group = grp_po3_main, active = enable_po3)
+po3_htf_data       = input.string('Weekly', 'Use HTF data to generate candles', options = ['Weekly', 'Always', 'Never'], group = grp_po3_main, active = enable_po3)
+
+grp_po3_up         = "PO3° Up Candles"
+po3_up_col         = input.color(color.new(#83b785, 0), 'Body', inline = 'po3_up', group = grp_po3_up, active = enable_po3)
+po3_up_col_wick    = input.color(#5f5f5f, 'Wick', inline = 'po3_up', group = grp_po3_up, active = enable_po3)
+po3_up_col_border  = input.color(#5f5f5f, 'Border', inline = 'po3_up', group = grp_po3_up, active = enable_po3)
+
+grp_po3_dn         = "PO3° Down Candles"
+po3_down_col       = input.color(color.new(#5f5f5f, 0), 'Body', inline = 'po3_dn', group = grp_po3_dn, active = enable_po3)
+po3_down_col_wick  = input.color(#5f5f5f, 'Wick', inline = 'po3_dn', group = grp_po3_dn, active = enable_po3)
+po3_down_col_border= input.color(#5f5f5f, 'Border', inline = 'po3_dn', group = grp_po3_dn, active = enable_po3)
+
+grp_po3_proj       = "PO3° Projections"
+po3_o_col          = input.color(color.new(color.black, 10), '', inline = 'po3_o', group = grp_po3_proj, active = enable_po3)
+po3_o_style        = input.string('Dotted', '', options = ['Solid', 'Dotted', 'Dashed'], inline = 'po3_o', group = grp_po3_proj, active = enable_po3)
+po3_o_width        = input.int(1, 'Width', minval = 1, inline = 'po3_o', group = grp_po3_proj, active = enable_po3)
+po3_o_enabled      = input.bool(true, 'Open', inline = 'po3_o', group = grp_po3_proj, active = enable_po3)
+po3_hl_col         = input.color(color.new(color.black, 10), '', inline = 'po3_hl', group = grp_po3_proj, active = enable_po3)
+po3_hl_style       = input.string('Dotted', '', options = ['Solid', 'Dotted', 'Dashed'], inline = 'po3_hl', group = grp_po3_proj, active = enable_po3)
+po3_hl_width       = input.int(1, 'Width', minval = 1, inline = 'po3_hl', group = grp_po3_proj, active = enable_po3)
+po3_hl_enabled     = input.bool(true, 'High/Low', inline = 'po3_hl', group = grp_po3_proj, active = enable_po3)
+po3_ohlc_col       = input.color(color.new(color.black, 10), '', inline = 'po3_ohlc', group = grp_po3_proj, active = enable_po3)
+po3_ohlc_size      = input.string('Small', '', options = ['Auto', 'Tiny', 'Small', 'Normal', 'Large', 'Huge'], inline = 'po3_ohlc', group = grp_po3_proj, active = enable_po3)
+po3_ohlc_enabled   = input.bool(false, 'OHLC Prices', inline = 'po3_ohlc', group = grp_po3_proj, active = enable_po3)
+
+grp_po3_time       = "PO3° Time & Date Labels"
+po3_show_timelbl   = input.bool(true,     "Show Candle Time/Date Labels?", group = grp_po3_time, active = enable_po3)
+po3_timelbl_col    = input.color(color.new(#1a1a1a, 0), "Text Color", inline = "po3_tl", group = grp_po3_time, active = enable_po3)
+po3_timelbl_size   = input.string("Small",              "Size",       options = ["Tiny", "Small", "Normal", "Large"], inline = "po3_tl", group = grp_po3_time, active = enable_po3)
+
+grpsmt      = "SMT SETTINGS"
+autoSMT     = input.bool(true,        "Auto Detect SMT Pair",  group=grpsmt)
+smtHistory  = input.int(1,            "SMT History Limit",     group=grpsmt, minval=1, maxval=50, tooltip="Number of recent SMT lines to keep visible on the chart.")
+smtPair     = input.symbol("ES1!",    "Manual Pair 1",         group=grpsmt, inline="smt1")
+inverse1    = input.bool(false,       "Inverse?",              group=grpsmt, inline="smt1")
+useSmtPair2 = input.bool(false,       "2nd SMT Pair",          group=grpsmt, inline="smt2")
+smtPair2    = input.symbol("YM1!",    "",                      group=grpsmt, inline="smt2", active=useSmtPair2)
+inverse2    = input.bool(false,       "Inverse?",              group=grpsmt, inline="smt2", active=useSmtPair2)
+
+grpmdl       = "MODEL SETTINGS"
+labelSize    = input.string("Small",                             "Label Size",  group=grpmdl, options=["Tiny","Small","Normal","Large"])
+fvgCol       = input.color(color.new(#787b86, 90),              "FVG                      ", group=grpmdl, inline="fvg")
+showCE       = input.bool(false,                                  "CE                ",        group=grpmdl, inline="ce")
+ceColor      = input.color(color.new(#787b86, 60),              "",                          group=grpmdl, inline="ce", active=showCE)
+ceStyle      = input.string("Solid",                            "",                           group=grpmdl, inline="ce", options=["Solid","Dashed","Dotted"], active=showCE)
+ceWidth      = input.int(1,                                     "",                           group=grpmdl, inline="ce", options=[1,2,3,4], active=showCE)
+
+showInvFVG    = input.bool(true,                                  "Show Inversion FVGs?",       group=grpmdl)
+bullInvBoxCol = input.color(color.new(#0068bd, 85),              "Bullish iFVG        Box",    group=grpmdl, inline="ifvg_bull", active=showInvFVG)
+bullInvTxtCol = input.color(#0068bd,                              "Txt",                       group=grpmdl, inline="ifvg_bull", active=showInvFVG)
+bearInvBoxCol = input.color(color.new(#bd0000, 85),              "Bearish iFVG        Box",    group=grpmdl, inline="ifvg_bear", active=showInvFVG)
+bearInvTxtCol = input.color(#bd0000,                              "Txt",                       group=grpmdl, inline="ifvg_bear", active=showInvFVG)
+erlColor     = input.color(color.new(color.black, 0),           "ERL                      ", group=grpmdl, inline="erl")
+erlStyle     = input.string("Solid",                            "",                           group=grpmdl, inline="erl", options=["Solid","Dashed","Dotted"])
+erlWidth     = input.int(1,                                     "",                           group=grpmdl, inline="erl", options=[1,2,3,4])
+sweepLineCol = input.color(#1a1a1a,                             "Sweep                  ",   group=grpmdl, inline="swp")
+sweepStyle   = input.string("Dotted",                           "",                           group=grpmdl, inline="swp", options=["Solid","Dashed","Dotted"])
+sweepWidth   = input.int(1,                                     "",                           group=grpmdl, inline="swp", options=[1,2,3,4])
+smtColor     = input.color(color.new(#000000, 0),               "SMT                      ", group=grpmdl, inline="smt")
+smtLineStyle = input.string("Dotted",                            "",                           group=grpmdl, inline="smt", options=["Solid","Dashed","Dotted"])
+smtWidth     = input.int(1,                                     "",                           group=grpmdl, inline="smt", options=[1,2,3,4])
+bullOBColor  = input.color(#0068bd,                             "OrderBlock",                group=grpmdl, inline="ob")
+bearOBColor  = input.color(#bd0000,                             "",                           group=grpmdl, inline="ob")
+obStyle      = input.string("Solid",                            "",                           group=grpmdl, inline="ob", options=["Solid","Dashed","Dotted"])
+obWidth      = input.int(1,                                     "",                           group=grpmdl, inline="ob", options=[1,2,3,4])
+
+grpTF             = "TIME FILTER"
+enableTimeFilter  = input.bool(true,   "Enable Time Filter?",  group=grpTF)
+useCustomTimezone = input.bool(false,  "Custom Timezone?",     group=grpTF, inline="tz", active=enableTimeFilter)
+timezoneHours     = input.int(-4,       "UTC",                  group=grpTF, inline="tz", minval=-12, maxval=14, active=useCustomTimezone)
+timezoneMinutes   = input.int(0,       "",                     group=grpTF, inline="tz", minval=0,   maxval=59, active=useCustomTimezone)
+enableFilter1     = input.bool(true,   "Filter 1",             group=grpTF, inline="f1", active=enableTimeFilter)
+filter1Session    = input.session("0200-0500", "",             group=grpTF, inline="f1", active=enableFilter1)
+enableFilter2     = input.bool(true,   "Filter 2",             group=grpTF, inline="f2", active=enableTimeFilter)
+filter2Session    = input.session("0800-1100", "",             group=grpTF, inline="f2", active=enableFilter2)
+enableFilter3     = input.bool(true,   "Filter 3",             group=grpTF, inline="f3", active=enableTimeFilter)
+filter3Session    = input.session("1330-1615", "",             group=grpTF, inline="f3", active=enableFilter3)
+enableFilter4     = input.bool(true,   "Filter 4",             group=grpTF, inline="f4", active=enableTimeFilter)
+filter4Session    = input.session("1800-2100", "",             group=grpTF, inline="f4", active=enableFilter4)
+
+grpbacktest    = "BACKTEST MARKERS"
+showInvalid    = input.bool(true,  "",               group=grpbacktest, inline="invalid")
+bullInvalidCol = input.color(color.new(#ff5252, 0),  "Invalidation",  group=grpbacktest, inline="invalid", active=showInvalid)
+bearInvalidCol = input.color(color.new(#ff5252, 0),  "",              group=grpbacktest, inline="invalid", active=showInvalid)
+invalidShape   = input.string("x", "",               group=grpbacktest, inline="invalid", active=showInvalid, options=["x","+","◆"], tooltip="Marker shape for SL invalidation")
+showTargetMark = input.bool(true,  "",               group=grpbacktest, inline="target")
+bullTargetCol  = input.color(color.new(#00a113, 0),  "Target",        group=grpbacktest, inline="target", active=showTargetMark)
+bearTargetCol  = input.color(color.new(#00a113, 0),  "",              group=grpbacktest, inline="target", active=showTargetMark)
+targetShape    = input.string("◆", "",               group=grpbacktest, inline="target", active=showTargetMark, options=["x","+","◆"], tooltip="Marker shape for target hit")
+showNofill     = input.bool(true,  "",               group=grpbacktest, inline="nofill")
+bullNofillCol  = input.color(color.new(#ea9023, 0),  "No Fill",       group=grpbacktest, inline="nofill", active=showNofill)
+bearNofillCol  = input.color(color.new(#ea9023, 0),  "",              group=grpbacktest, inline="nofill", active=showNofill)
+nofillShape    = input.string("◆", "",               group=grpbacktest, inline="nofill", active=showNofill, options=["x","+","◆"], tooltip="Marker shape for no-fill outcome")
+showERLMarker  = input.bool(true,  "",               group=grpbacktest, inline="erl_mark")
+bullERLCol     = input.color(color.new(#00a113, 0),  "ERL",           group=grpbacktest, inline="erl_mark", active=showERLMarker)
+bearERLCol     = input.color(color.new(#00a113, 0),  "",              group=grpbacktest, inline="erl_mark", active=showERLMarker)
+erlShape       = input.string("+", "",               group=grpbacktest, inline="erl_mark", active=showERLMarker, options=["x","+","◆"], tooltip="Marker shape for ERL hit")
+
+grp_qt_main = "QUARTERLY THEORY"
+enable_qt   = input.bool(true, "Enable Quarterly Theory Cycles?", group=grp_qt_main)
+qt_mdl1     = "Free"
+qt_mdl2     = "Daye's Theory"
+qt_mdl3     = "Zeussy's Theory"
+qt_mdl      = input.string(qt_mdl1, "Selection Model for Daily Cycle", options=[qt_mdl1, qt_mdl2, qt_mdl3], group=grp_qt_main, active=enable_qt)
+
+grp_qt_f    = "Model Settings"
+qt_tz       = input.string('GMT-4', '[Timezone]', options=['GMT-11', 'GMT-10', 'GMT-9', 'GMT-8', 'GMT-7', 'GMT-6', 'GMT-5', 'GMT-4', 'GMT-3', 'GMT-2', 'GMT-1', 'GMT', 'GMT+1', 'GMT+2', 'GMT+3', 'GMT+4', 'GMT+5', 'GMT+5:30', 'GMT+6', 'GMT+7', 'GMT+8', 'GMT+9', 'GMT+10', 'GMT+11', 'GMT+12'], group=grp_qt_f, active=enable_qt)
+qt_start_h  = input.int(18, '[Start Hour]', group=grp_qt_f, inline='qt_t0', active=enable_qt)
+qt_start_m  = input.int(0,  '[Minute]',     group=grp_qt_f, inline='qt_t0', active=enable_qt)
+qt_free_day = input.int(360,"[Duration of Daily Cycle (Minute)]", group=grp_qt_f, active=enable_qt)
+qt_X_       = input.int(4,  '[Division Coefficient (X)]', minval=2, group=grp_qt_f, active=enable_qt)
+
+grp_qt_disp = "Display & Color Settings"
+qt_history     = input.int(4,      "History (Max Boxes)", minval=1, maxval=50, group=grp_qt_disp, tooltip="Number of QT boxes to keep visible on the chart. e.g. 3 keeps only the last 3 boxes.", active=enable_qt)
+qt_divi_show   = input.bool(false, '[Divider]', inline='qt_d1', group=grp_qt_disp, active=enable_qt)
+qt_divi_clr    = input.color(color.new(color.navy, 80), "", inline='qt_d1', group=grp_qt_disp, active=enable_qt)
+qt_show_b      = input.bool(true,  '[Box]',   inline='qt_y1', group=grp_qt_disp, active=enable_qt)
+qt_show_l      = input.bool(false, '[Line]',  inline='qt_y1', group=grp_qt_disp, active=enable_qt)
+qt_show_lbl    = input.bool(false, '[Label]', inline='qt_y1', group=grp_qt_disp, active=enable_qt)
+qt_use_nm      = input.bool(false, '[Numeric Labeling]', group=grp_qt_disp, active=enable_qt)
+qt_width       = input.int(0, '[Border Width]', inline='qt_y3', group=grp_qt_disp, active=enable_qt)
+qt_style       = input.string('Dashed', 'Type', options=['Solid', 'Dashed', 'Dotted'], inline='qt_y3', group=grp_qt_disp, active=enable_qt)
+
+grp_qt_col     = "Cycle Colors"
+qt_q1_clr      = input.color(color.gray, "[Q1/W1/A Box]", inline="qt_c1", group=grp_qt_col, active=enable_qt)
+qt_q2_clr      = input.color(color.red,  "[Q2/W2/M Box]", inline="qt_c1", group=grp_qt_col, active=enable_qt)
+qt_q3_clr      = input.color(color.teal, "[Q3/W3/D Box]", inline="qt_c2", group=grp_qt_col, active=enable_qt)
+qt_q4_clr      = input.color(color.blue, "[Q4/W4/X Box]", inline="qt_c2", group=grp_qt_col, active=enable_qt)
+qt_contrast    = input.int(95, '[Background Contrast]', minval=2, maxval=100, group=grp_qt_col, inline="qt_c3", active=enable_qt)
+qt_contrast2   = input.int(50, '[Border Contrast]',     minval=2, maxval=100, group=grp_qt_col, inline="qt_c3", active=enable_qt)
+qt_show_lower  = input.bool(false, "[Lower Cycle]", group=grp_qt_col, active=enable_qt)
+
+grpi                 = "INFO TABLE / DASHBOARD"
+boolTable            = input.bool(true,      "Show Info Table?",   group=grpi, inline="d1")
+dashboardSize        = input.string("Small", "Text Size",          group=grpi, inline="d1", options=["Tiny", "Small", "Normal", "Large", "Huge"])
+tableloc1            = input.string("Top",   "Table Location",     group=grpi, inline="d2", options=["Top","Middle","Bottom"])
+tableloc2            = input.string("Right", "",                   group=grpi, inline="d2", options=["Left","Centre","Right"])
+dashboardBgColor     = input.color(color.new(color.gray, 90), "Background Color", group=grpi)
+dashboardBorderColor = input.color(color.new(#1a1a1a, 0),       "Border Color",     group=grpi)
+dashboardTextColor   = input.color(color.new(#1a1a1a, 0),       "Text Color",       group=grpi)
+dashboardBorderWidth = input.int(2,          "Border Width",       group=grpi, minval=0, maxval=5)
+dashboardFrameColor  = input.color(color.new(#1a1a1a, 0),       "Frame Color",      group=grpi)
+dashboardFrameWidth  = input.int(2,          "Frame Width",        group=grpi, minval=0, maxval=5)
+alignmentInfo        = input.bool(true,      "Timeframe Alignment",group=grpi, inline="gen")
+biasInfo             = input.bool(true,      "Bias",               group=grpi, inline="gen")
+timeInfo             = input.bool(true,      "Time Filter",        group=grpi, inline="gen1")
+dateInfo             = input.bool(true,      "Date",               group=grpi, inline="gen1")
+
+f_autoSmtPair(string t) =>
+    switch t
+        "ES1!"    => "NQ1!"
+        "NQ1!"    => "ES1!"
+        "GC1!"    => "SI1!"
+        "SI1!"    => "GC1!"
+        "CL1!"    => "RB1!"
+        "RB1!"    => "CL1!"
+        "6E1!"    => "6B1!"
+        "6B1!"    => "6E1!"
+        "6A1!"    => "6N1!"
+        "6N1!"    => "6A1!"
+        "BTC1!"   => "ETH1!"
+        "ETH1!"   => "BTC1!"
+        "BTCUSD"  => "ETHUSD"
+        "ETHUSD"  => "BTCUSD"
+        "BTCUSDT" => "ETHUSDT"
+        "ETHUSDT" => "BTCUSDT"
+        "USDJPY"  => "DXY"
+        "USDCHF"  => "DXY"
+        "USDCAD"  => "DXY"
+        "DXY"     => "USDJPY"
+        "EURUSD"  => "GBPUSD"
+        "GBPUSD"  => "EURUSD"
+        "AUDUSD"  => "NZDUSD"
+        "NZDUSD"  => "AUDUSD"
+        "AUDCAD"  => "NZDCAD"
+        "NZDCAD"  => "AUDCAD"
+        "EURCAD"  => "GBPCAD"
+        "GBPCAD"  => "EURCAD"
+        "EURAUD"  => "GBPAUD"
+        "GBPAUD"  => "EURAUD"
+        "EURNZD"  => "GBPNZD"
+        "GBPNZD"  => "EURNZD"
+        "EURJPY"  => "GBPJPY"
+        "GBPJPY"  => "EURJPY"
+        "AUDJPY"  => "NZDJPY"
+        "NZDJPY"  => "AUDJPY"
+        "XAUUSD"  => "XAGUSD"
+        "XAGUSD"  => "XAUUSD"
+        => na
+
+string _autoResult     = f_autoSmtPair(syminfo.ticker)
+bool   _smtAutoFound   = autoSMT and not na(_autoResult)
+string resolvedSmtPair = _smtAutoFound ? _autoResult : smtPair
+
+resolvedHTF = switch modelType
+    "Custom"  => customHTF
+    "1m-15m"  => "15"
+    "3m-30m"  => "30"
+    "5m-1H"   => "60"
+    "15m-4H"  => "240"
+    "1H-1D"   => "1D"
+    "4H-1W"   => "1W"
+    "1D-1W"   => "1W"
+    "6H-15m"  => "360"
+    "90M-5m"  => "90"
+    => timeframe.period == "1" ? "15" : timeframe.period == "3" ? "30" : timeframe.period == "5" ? "60" :
+       timeframe.period == "15" ? "240" : timeframe.period == "60" ? "1D" : "1W"
+
+resolvedLTF = switch modelType
+    "Custom"  => customLTF
+    "1m-15m"  => "1"
+    "3m-30m"  => "3"
+    "5m-1H"   => "5"
+    "15m-4H"  => "15"
+    "1H-1D"   => "60"
+    "4H-1W"   => "240"
+    "1D-1W"   => "1D"
+    "6H-15m"  => "15"
+    "90M-5m"  => "5"
+    => timeframe.period
+
+validTF  = timeframe.in_seconds(resolvedHTF) >= timeframe.in_seconds()
+cspacer  = timeframe.in_seconds() * 1000
+htfMsec  = timeframe.in_seconds(resolvedHTF) * 1000
+
+const int   MAX_FVGS  = 50
+const color NO_COLOR  = color.new(color.white, 100)
+
+ls(string s)  => s == "Dashed" ? line.style_dashed : s == "Dotted" ? line.style_dotted : line.style_solid
+lsz(string s) => s == "Tiny" ? size.tiny : s == "Normal" ? size.normal : s == "Large" ? size.large : size.small
+
+simple string _ceStyleStr    = ceStyle
+simple string _erlStyleStr   = erlStyle
+simple string _sweepStyleStr = sweepStyle
+simple string _smtStyleStr   = smtLineStyle
+simple string _obStyleStr    = obStyle
+simple string _labelSzStr    = labelSize
+
+f_cleanTicker(string sym) =>
+    parts = str.split(sym, ":")
+    parts.get(parts.size() - 1)
+
+f_tfLabel(string tf) =>
+    string res = tf
+    if tf == "1D"
+        res := "1D"
+    else if tf == "1W"
+        res := "1W"
+    else
+        float mins = str.tonumber(tf)
+        if not na(mins)
+            if mins < 60
+                res := str.tostring(int(mins)) + "m"
+            else if mins % 60 == 0
+                res := str.tostring(int(mins / 60)) + "H"
+            else
+                res := str.tostring(mins) + "m"
+    res
+
+f_tablePosH(string v, string h) =>
+    switch h
+        "Left"   => v == "Top" ? position.top_left   : v == "Middle" ? position.middle_left   : position.bottom_left
+        "Centre" => v == "Top" ? position.top_center : v == "Middle" ? position.middle_center : position.bottom_center
+        =>          v == "Top" ? position.top_right  : v == "Middle" ? position.middle_right  : position.bottom_right
+
+f_timeFilterLabel() =>
+    if not enableTimeFilter
+        ""
+    else
+        array<string> sessions = array.new_string()
+        if enableFilter1 and str.length(str.trim(filter1Session)) > 0
+            sessions.push(str.trim(filter1Session))
+        if enableFilter2 and str.length(str.trim(filter2Session)) > 0
+            sessions.push(str.trim(filter2Session))
+        if enableFilter3 and str.length(str.trim(filter3Session)) > 0
+            sessions.push(str.trim(filter3Session))
+        if enableFilter4 and str.length(str.trim(filter4Session)) > 0
+            sessions.push(str.trim(filter4Session))
+        sessions.size() > 0 ? sessions.join(" | ") : ""
+
+f_dashTz() =>
+    if useCustomTimezone
+        string sign = timezoneHours >= 0 ? "+" : "-"
+        string hh   = str.tostring(math.abs(timezoneHours))
+        string mm   = timezoneMinutes < 10 ? "0" + str.tostring(timezoneMinutes) : str.tostring(timezoneMinutes)
+        "UTC" + sign + hh + (timezoneMinutes != 0 ? ":" + mm : "")
+    else
+        syminfo.timezone
+
+f_inSession(string sess) =>
+    not na(time(timeframe.period, sess, f_dashTz()))
+
+f_timeFilterActive() =>
+    if not enableTimeFilter
+        true
+    else
+        bool any = false
+        if enableFilter1 and str.length(str.trim(filter1Session)) > 0 and f_inSession(filter1Session)
+            any := true
+        if enableFilter2 and str.length(str.trim(filter2Session)) > 0 and f_inSession(filter2Session)
+            any := true
+        if enableFilter3 and str.length(str.trim(filter3Session)) > 0 and f_inSession(filter3Session)
+            any := true
+        if enableFilter4 and str.length(str.trim(filter4Session)) > 0 and f_inSession(filter4Session)
+            any := true
+        any
+
+var string s1Ticker = na
+var string s2Ticker = na
+
+var float[] obProjections = array.new<float>()
+var float   _maxProj      = na
+
+if barstate.isfirst
+    s1Ticker := f_cleanTicker(resolvedSmtPair)
+    s2Ticker := f_cleanTicker(smtPair2)
+    for part in str.split(str.replace_all(obProjInput, " ", ""), ",")
+        v = str.tonumber(part)
+        if not na(v)
+            obProjections.push(v)
+    if obProjections.size() > 0
+        _maxProj := obProjections.get(0)
+        for k = 1 to obProjections.size() - 1
+            _maxProj := math.max(_maxProj, obProjections.get(k))
+
+htfPivotH() =>
+    var float v = na
+    p = ta.pivothigh(high, 1, 1)
+    if not na(p)
+        v := p
+    v
+
+htfPivotL() =>
+    var float v = na
+    p = ta.pivotlow(low, 1, 1)
+    if not na(p)
+        v := p
+    v
+
+findPrice(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = (time - t0) / cspacer
+    if span > 0 and span < 5000
+        for j = 0 to span
+            if (useHigh ? high[j] : low[j]) == price
+                result := time[j]
+                break
+    result
+
+f_smtFindPrice(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = math.min((time - t0) / cspacer, 500)
+    if span > 0
+        for j = 0 to span
+            int lt = time[j]
+            if lt < t0
+                break
+            float p = useHigh ? high[j] : low[j]
+            if lt < t0 + htfMsec and p == price
+                result := lt
+                break
+    result
+
+f_findExtremeBar(float price, int t0, bool useHigh) =>
+    int result = t0
+    int span   = math.min((time - t0) / cspacer, 5000)
+    if span > 0
+        for j = span to 0
+            int lt = time[j]
+            if lt >= t0
+                float p = useHigh ? high[j] : low[j]
+                if p == price
+                    result := lt
+                    break
+    result
+
+type SmtPair
+    float  anchorH
+    float  anchorL
+    float  bucketH
+    float  bucketL
+    bool   foundBull
+    bool   foundBear
+    line   lineBull
+    line   lineBear
+    label  labelBull
+    label  labelBear
+    string ticker
+    int    smtBullBar
+    int    smtBearBar
+
+type AnchorState
+    int      startTime
+    float    anchorH
+    float    anchorL
+    int      bucket
+    float    bucketH
+    float    bucketL
+    float    exH
+    float    exL
+    SmtPair  p1
+    SmtPair  p2
+
+type SwingPivot
+    float price
+    int   barTime
+
+type PivotTier
+    SwingPivot[] st
+    SwingPivot[] it
+    SwingPivot[] lt
+
+type AnchorPivot
+    float price
+    int   barTime
+    bool  swept
+
+type InversionFVG
+    int     left
+    float   top
+    int     right
+    float   bot
+    float   mid
+    int     dir
+    int     state
+    int     creationBar
+    int     inversionBar
+    box     invBox
+    label   invLabel
+    bool    mitigated
+    int     mitigationTime
+
+type OrderBlock
+    float          openPrice
+    int            barTime
+    float          pivotPrice
+    int            pivotTime
+    float          scHigh
+    float          scLow
+    line           obLine
+    line           sweepLine
+    label          obLabel
+    line[]         projLines
+    label[]        projLabels
+    float          slPrice
+    bool           active
+    float          targetPrice
+    bool           targetHit
+    bool           filled
+    float          erlPrice
+    line           erlLine
+    label          erlLabel
+    bool           erlHit
+    bool           frozen
+    InversionFVG[] iFVGs
+
+type FVG
+    box           bx
+    line          mid
+    label         lbl
+    float         hi
+    float         lo
+    bool          bull
+    bool          mitigated
+    float         erlLvl
+    float         pivotLvl
+    int           linkId
+    AnchorState[] anchors
+    PivotTier     pivotH
+    PivotTier     pivotL
+    AnchorPivot[] stHighAnc
+    AnchorPivot[] itHighAnc
+    AnchorPivot[] ltHighAnc
+    AnchorPivot[] stLowAnc
+    AnchorPivot[] itLowAnc
+    AnchorPivot[] ltLowAnc
+    OrderBlock[]  pendingBullOB
+    OrderBlock[]  pendingBearOB
+    OrderBlock[]  confirmedBullOB
+    OrderBlock[]  confirmedBearOB
+    bool          done
+    bool          fvgFrozen
+    bool          smtAlerted
+    bool          obAlerted
+
+type EntryRecord
+    OrderBlock ob
+    int        obBarTime
+
+var EntryRecord[] frozenEntries = array.new<EntryRecord>()
+
+type Candle
+    box   body
+    line  upperWick
+    line  lowerWick
+    line  o
+    line  h
+    line  l
+    label labelO
+    label labelH
+    label labelL
+    label labelC
+    label labelTime
+    int   cTime
+
+type CycleLayer
+    box[]   boxes
+    label[] labels
+    float   o
+    float   h
+    float   l
+    float   c
+    int     t
+    int     limit
+    int     b_width
+    string  b_style
+    bool    show_box
+    bool    show_line
+    bool    show_label
+
+f_deleteEntryPlots(OrderBlock ob) =>
+    if not na(ob.obLine)
+        ob.obLine.delete()
+        ob.obLine := na
+    if not na(ob.sweepLine)
+        ob.sweepLine.delete()
+        ob.sweepLine := na
+    if not na(ob.obLabel)
+        ob.obLabel.delete()
+        ob.obLabel := na
+    if not na(ob.erlLine)
+        ob.erlLine.delete()
+        ob.erlLine := na
+    if not na(ob.erlLabel)
+        ob.erlLabel.delete()
+        ob.erlLabel := na
+    if ob.projLines.size() > 0
+        for ln in ob.projLines
+            ln.delete()
+        ob.projLines.clear()
+    if ob.projLabels.size() > 0
+        for lb in ob.projLabels
+            lb.delete()
+        ob.projLabels.clear()
+    if not na(ob.iFVGs) and ob.iFVGs.size() > 0
+        for inv in ob.iFVGs
+            if not na(inv.invBox)
+                inv.invBox.delete()
+            if not na(inv.invLabel)
+                inv.invLabel.delete()
+        ob.iFVGs.clear()
+
+f_grayOutOB(OrderBlock ob) =>
+    if not na(ob.sweepLine)
+        ob.sweepLine.delete()
+        ob.sweepLine := na
+    if ob.projLines.size() > 0
+        for ln in ob.projLines
+            ln.delete()
+        ob.projLines.clear()
+    if ob.projLabels.size() > 0
+        for lb in ob.projLabels
+            lb.delete()
+        ob.projLabels.clear()
+    if not na(ob.obLine)
+        line.set_color(ob.obLine, color.gray)
+        line.set_width(ob.obLine, 1)
+    if not na(ob.obLabel)
+        label.set_textcolor(ob.obLabel, color.gray)
+    if not na(ob.erlLine)
+        line.set_color(ob.erlLine, color.new(color.gray, 60))
+    if not na(ob.erlLabel)
+        label.set_textcolor(ob.erlLabel, color.gray)
+    if not na(ob.iFVGs) and ob.iFVGs.size() > 0
+        for inv in ob.iFVGs
+            if not na(inv.invBox)
+                box.set_bgcolor(inv.invBox, color.new(color.gray, 92))
+            if not na(inv.invLabel)
+                label.set_textcolor(inv.invLabel, color.gray)
+
+var InversionFVG[] g_bullFVGArray = array.new<InversionFVG>()
+var InversionFVG[] g_bearFVGArray = array.new<InversionFVG>()
+var InversionFVG[] g_bullInvArray = array.new<InversionFVG>()
+var InversionFVG[] g_bearInvArray = array.new<InversionFVG>()
+
+fvgManage(InversionFVG[] fvgArray, InversionFVG[] invArray) =>
+    if fvgArray.size() >= 100
+        fvgArray.shift()
+    if fvgArray.size() > 0
+        float cTop = math.max(open, close)
+        float cBot = math.min(open, close)
+        for k = fvgArray.size() - 1 to 0
+            fvg = fvgArray.get(k)
+            if fvg.dir == 1 and cBot < fvg.bot
+                fvg.inversionBar := bar_index
+                fvg.right := time
+                invArray.push(fvgArray.remove(k))
+            else if fvg.dir == -1 and cTop > fvg.top
+                fvg.inversionBar := bar_index
+                fvg.right := time
+                invArray.push(fvgArray.remove(k))
+
+invManage(InversionFVG[] invArray) =>
+    float cTop = math.max(open, close)
+    float cBot = math.min(open, close)
+    if invArray.size() >= 100
+        invArray.shift()
+    if invArray.size() > 0
+        for k = invArray.size() - 1 to 0
+            inv = invArray.get(k)
+            if inv.state == 0
+                inv.state := 1
+                inv.dir := inv.dir == 1 ? -1 : 1
+            if inv.state >= 1
+                inv.right := time
+                bool isMitigated = inv.dir == -1 ? cTop > inv.top : cBot < inv.bot
+                if isMitigated
+                    inv.mitigated := true
+                    invArray.remove(k)
+
+findInversionFVGs(bool isBullSetup, int pivotBar, int confBar, float obPrice) =>
+    InversionFVG[] found = array.new<InversionFVG>()
+    InversionFVG[] src = isBullSetup ? g_bullInvArray : g_bearInvArray
+    if src.size() > 0
+        for k = 0 to src.size() - 1
+            inv = src.get(k)
+            if not inv.mitigated and not na(inv.creationBar) and not na(inv.inversionBar)
+                if inv.creationBar >= pivotBar and inv.inversionBar <= confBar
+                    bool validLocation = isBullSetup ? (inv.top <= obPrice or inv.mid <= obPrice) : (inv.bot >= obPrice or inv.mid >= obPrice)
+                    if validLocation
+                        bool exists = false
+                        if found.size() > 0
+                            for ex in found
+                                if math.abs(ex.top - inv.top) < syminfo.mintick and math.abs(ex.bot - inv.bot) < syminfo.mintick
+                                    exists := true
+                                    break
+                        if not exists
+                            InversionFVG copyInv = InversionFVG.new(
+                                 inv.left, inv.top, inv.right, inv.bot, inv.mid,
+                                 inv.dir, inv.state, inv.creationBar, inv.inversionBar,
+                                 na, na, false, na)
+                            found.push(copyInv)
+    found
+
+f_registerFrozenEntry(OrderBlock ob) =>
+    frozenEntries.push(EntryRecord.new(ob, ob.barTime))
+    int n = frozenEntries.size()
+    if n > 1
+        for a = n - 1 to 1
+            ea = frozenEntries.get(a)
+            eb = frozenEntries.get(a - 1)
+            if ea.obBarTime < eb.obBarTime
+                frozenEntries.set(a,     eb)
+                frozenEntries.set(a - 1, ea)
+            else
+                break
+    while frozenEntries.size() > showHistory
+        evicted = frozenEntries.get(0)
+        f_deleteEntryPlots(evicted.ob)
+        frozenEntries.remove(0)
+
+f_removeFrozenEntry(int obBarTime) =>
+    if frozenEntries.size() > 0
+        for k = frozenEntries.size() - 1 to 0
+            if frozenEntries.get(k).obBarTime == obBarTime
+                frozenEntries.remove(k)
+                break
+
+var bool plotBullSL     = false
+var bool plotBearSL     = false
+var bool plotBullTarget = false
+var bool plotBearTarget = false
+var bool plotBullNofill = false
+var bool plotBearNofill = false
+var bool plotBullERL    = false
+var bool plotBearERL    = false
+
+var bool   fireSMTFVG      = false
+var bool   fireModelActive = false
+var bool   fireProjHit     = false
+var bool   fireERLHit      = false
+var string alertSmtMsg     = ""
+var string alertObMsg      = ""
+var string alertProjMsg    = ""
+var string alertErlMsg     = ""
+
+f_drawSmtLine(bool isBull, float anchorP, float currentP, int anchorT, int currentT) =>
+    int x1 = f_smtFindPrice(anchorP, anchorT, not isBull)
+    int x2 = f_findExtremeBar(currentP, currentT, not isBull)
+    line.new(x1, anchorP, x2, currentP, xloc=xloc.bar_time, color=smtColor, width=smtWidth, style=ls(_smtStyleStr))
+
+f_drawSmtLabel(bool isBull, line ln, string txt) =>
+    int   lx = line.get_x1(ln) + int((line.get_x2(ln) - line.get_x1(ln)) / 2)
+    float ly = (line.get_y1(ln) + line.get_y2(ln)) / 2
+    label.new(lx, ly, txt,
+              xloc=xloc.bar_time,
+              style=isBull ? label.style_label_up : label.style_label_down,
+              color=NO_COLOR, textcolor=smtColor, size=lsz(_labelSzStr),
+              text_font_family=font.family_monospace)
+
+f_updateSmtLine(bool isBull, float currentP, int currentT, line ln) =>
+    int x2 = f_findExtremeBar(currentP, currentT, not isBull)
+    line.set_x2(ln, x2)
+    line.set_y2(ln, currentP)
+
+f_linesMatch(line a, line b) =>
+    na(a) or na(b) ? false :
+     line.get_x1(a) == line.get_x1(b) and line.get_y1(a) == line.get_y1(b) and
+     line.get_x2(a) == line.get_x2(b) and line.get_y2(a) == line.get_y2(b)
+
+var line[]   activeSmtLines   = array.new<line>()
+var label[]  activeSmtLabels  = array.new<label>()
+
+f_drawPair(SmtPair p, bool isBull, float anchorP, float extremeP, int anchorT, int currentT) =>
+    ln  = f_drawSmtLine(isBull, anchorP, extremeP, anchorT, currentT)
+    lbl = f_drawSmtLabel(isBull, ln, p.ticker)
+    array.push(activeSmtLines, ln)
+    array.push(activeSmtLabels, lbl)
+    while array.size(activeSmtLines) > smtHistory
+        line oldLn = array.shift(activeSmtLines)
+        label oldLbl = array.shift(activeSmtLabels)
+        if not na(oldLn)
+            oldLn.delete()
+        if not na(oldLbl)
+            oldLbl.delete()
+    if isBull
+        p.lineBull   := ln
+        p.labelBull  := lbl
+        p.foundBull  := true
+        p.smtBullBar := bar_index
+    else
+        p.lineBear   := ln
+        p.labelBear  := lbl
+        p.foundBear  := true
+        p.smtBearBar := bar_index
+
+f_syncLabels(bool isBull, SmtPair p1, SmtPair p2, string combinedTxt) =>
+    line  ln1    = isBull ? p1.lineBull : p1.lineBear
+    line  ln2    = isBull ? p2.lineBull : p2.lineBear
+    label _ret   = na
+    if not na(ln1) and not na(ln2)
+        merged = f_linesMatch(ln1, ln2)
+        line.set_color(ln2, merged ? NO_COLOR : smtColor)
+        lbl1 = isBull ? p1.labelBull : p1.labelBear
+        lbl2 = isBull ? p2.labelBull : p2.labelBear
+        if not na(lbl1)
+            lbl1.delete()
+        if not na(lbl2)
+            lbl2.delete()
+        newLbl1 = f_drawSmtLabel(isBull, ln1, merged ? combinedTxt : p1.ticker)
+        newLbl2 = merged ? na : f_drawSmtLabel(isBull, ln2, p2.ticker)
+        if isBull
+            p1.labelBull  := newLbl1
+            p2.labelBull  := newLbl2
+            p2.smtBullBar := merged ? p1.smtBullBar : p2.smtBullBar
+        else
+            p1.labelBear  := newLbl1
+            p2.labelBear  := newLbl2
+            p2.smtBearBar := merged ? p1.smtBearBar : p2.smtBearBar
+        _ret := newLbl1
+    else if na(ln1) and not na(ln2)
+        lbl2 = isBull ? p2.labelBull : p2.labelBear
+        if not na(lbl2)
+            lbl2.delete()
+        newLbl2 = f_drawSmtLabel(isBull, ln2, p2.ticker)
+        if isBull
+            p2.labelBull := newLbl2
+        else
+            p2.labelBear := newLbl2
+        _ret := newLbl2
+    _ret
+
+f_deleteSmtPairLine(SmtPair p, bool isBull) =>
+    ln  = isBull ? p.lineBull  : p.lineBear
+    lbl = isBull ? p.labelBull : p.labelBear
+    if not na(ln)
+        ln.delete()
+        if isBull
+            p.lineBull := na
+        else
+            p.lineBear := na
+    if not na(lbl)
+        lbl.delete()
+        if isBull
+            p.labelBull := na
+        else
+            p.labelBear := na
+
+f_resolveBestSmt(SmtPair p1, SmtPair p2, bool isBull) =>
+    line  ln1    = isBull ? p1.lineBull : p1.lineBear
+    line  ln2    = isBull ? p2.lineBull : p2.lineBear
+    int   bar1   = isBull ? p1.smtBullBar : p1.smtBearBar
+    int   bar2   = isBull ? p2.smtBullBar : p2.smtBearBar
+    bool  found1 = isBull ? p1.foundBull  : p1.foundBear
+    bool  found2 = isBull ? p2.foundBull  : p2.foundBear
+    float y2_1 = not na(ln1) ? line.get_y2(ln1) : float(na)
+    float y2_2 = not na(ln2) ? line.get_y2(ln2) : float(na)
+    bool merged = useSmtPair2 and found1 and found2 and not na(ln1) and not na(ln2) and f_linesMatch(ln1, ln2)
+    int   winBar  = na
+    line  winLine = na
+    float winY2   = float(na)
+    if merged
+        winBar  := bar1
+        winLine := ln1
+        winY2   := y2_1
+    else if useSmtPair2 and found1 and found2 and not na(ln1) and not na(ln2)
+        bool p1wins = isBull ? y2_1 < y2_2 : y2_1 > y2_2
+        if p1wins
+            winBar  := bar1
+            winLine := ln1
+            winY2   := y2_1
+            ln2.delete()
+            lbl2 = isBull ? p2.labelBull : p2.labelBear
+            if not na(lbl2)
+                lbl2.delete()
+        else
+            winBar  := bar2
+            winLine := ln2
+            winY2   := y2_2
+            ln1.delete()
+            lbl1 = isBull ? p1.labelBull : p1.labelBear
+            if not na(lbl1)
+                lbl1.delete()
+    else if found1 and not na(ln1)
+        winBar  := bar1
+        winLine := ln1
+        winY2   := y2_1
+    else if useSmtPair2 and found2 and not na(ln2)
+        winBar  := bar2
+        winLine := ln2
+        winY2   := y2_2
+    [winBar, winLine, winY2]
+
+f_promoteSwingLevel(SwingPivot[] src, SwingPivot[] dst, bool isHigh) =>
+    if src.size() > 2
+        float y1 = src.get(src.size() - 1).price
+        float y2 = src.get(src.size() - 2).price
+        float y3 = src.get(src.size() - 3).price
+        if isHigh ? (y1 < y2 and y2 > y3) : (y1 > y2 and y2 < y3)
+            cand = src.get(src.size() - 2)
+            if dst.size() == 0 or dst.last().price != cand.price
+                dst.push(SwingPivot.new(cand.price, cand.barTime))
+                src.remove(src.size() - 2)
+
+f_promoteAnc(AnchorPivot[] src, AnchorPivot[] dst, int barTime) =>
+    if src.size() > 0
+        for k = src.size() - 1 to 0
+            anc = src.get(k)
+            if anc.barTime == barTime and not anc.swept
+                src.remove(k)
+                dst.push(AnchorPivot.new(anc.price, anc.barTime, false))
+                break
+
+f_ictSwing(PivotTier tier,
+           AnchorPivot[] stAnc, AnchorPivot[] itAnc, AnchorPivot[] ltAnc,
+           bool isHigh, int hBars, int lBars) =>
+    float price = isHigh ? high[1] : low[1]
+    if (isHigh ? hBars : lBars) == -1
+        tier.st.push(SwingPivot.new(price, time[1]))
+        stAnc.push(AnchorPivot.new(price, time[1], false))
+    f_promoteSwingLevel(tier.st, tier.it, isHigh)
+    f_promoteSwingLevel(tier.it, tier.lt, isHigh)
+    if tier.st.size() > 2
+        sp = tier.st.get(tier.st.size() - 2)
+        if tier.it.size() > 0 and tier.it.last().barTime == sp.barTime
+            f_promoteAnc(stAnc, itAnc, sp.barTime)
+    if tier.it.size() > 2
+        sp = tier.it.get(tier.it.size() - 2)
+        if tier.lt.size() > 0 and tier.lt.last().barTime == sp.barTime
+            f_promoteAnc(itAnc, ltAnc, sp.barTime)
+
+f_cleanTier(AnchorPivot[] anchors, bool isBull) =>
+    if anchors.size() > 0
+        for j = anchors.size() - 1 to 0
+            anc = anchors.get(j)
+            if not anc.swept and (isBull ? low < anc.price : high > anc.price)
+                anc.swept := true
+            if anc.swept
+                anchors.remove(j)
+
+f_sweepTier(AnchorPivot[] anchors, OrderBlock[] pending, bool isBull) =>
+    int   bestIdx   = -1
+    float bestPrice = na
+    int   bestBar   = na
+    if anchors.size() > 0
+        for i = anchors.size() - 1 to 0
+            anc = anchors.get(i)
+            bool hit = isBull ? low < anc.price : high > anc.price
+            if not anc.swept and hit
+                anc.swept := true
+                if bestIdx == -1 or (isBull ? anc.price < bestPrice : anc.price > bestPrice)
+                    bestIdx := i, bestPrice := anc.price, bestBar := anc.barTime
+            if anc.swept
+                anchors.remove(i)
+        if bestIdx != -1
+            float candr = high - low
+            bool  ok    = candr > 0 and math.abs(close - open) * 100 / candr >= 50 and (isBull ? close < open : close > open)
+            if ok
+                pending.push(OrderBlock.new(open, time, bestPrice, bestBar, high, low,
+                                            na, na, na,
+                                            array.new<line>(), array.new<label>(),
+                                            float(na), true,
+                                            float(na), false,
+                                            false,
+                                            float(na), na, na, false, false,
+                                            array.new<InversionFVG>()))
+    bestIdx
+
+f_processSweeps(AnchorPivot[] ltAnc, AnchorPivot[] itAnc, AnchorPivot[] stAnc,
+                OrderBlock[] pending, bool isBull) =>
+    if f_sweepTier(ltAnc, pending, isBull) != -1
+        f_cleanTier(itAnc, isBull)
+        f_cleanTier(stAnc, isBull)
+    else if f_sweepTier(itAnc, pending, isBull) != -1
+        f_cleanTier(stAnc, isBull)
+    else
+        f_sweepTier(stAnc, pending, isBull)
+    bool(na)
+
+f_resolveObSL(bool isBull, float smtLineY2, float scH, float scL) =>
+    bool useSMT = obSLCalc == "SMT Based Invalidation" or (obSLCalc == "Automatic" and timeframe.in_seconds(timeframe.period) < timeframe.in_seconds("60"))
+    useSMT ? smtLineY2 : (isBull ? scL : scH)
+
+method deleteOB(OrderBlock self) =>
+    f_deleteEntryPlots(self)
+
+f_hasActiveOB(OrderBlock[] obs) =>
+    bool found = false
+    if obs.size() > 0
+        for ob in obs
+            if ob.active and not ob.targetHit and not ob.frozen
+                found := true
+                break
+    found
+
+f_confirm(OrderBlock[] pending, OrderBlock[] confirmed, bool isBull, int winBar, line winLine, float winY2,
+          float erlLvlSnap, int t1Snap, int t2Snap,
+          SmtPair pa1, SmtPair pa2, SmtPair pb1, SmtPair pb2, SmtPair pc1, SmtPair pc2) =>
+    if pending.size() > 0
+        bool plotted = false
+        for i = 0 to pending.size() - 1
+            ob = pending.get(i)
+            bool confirmedBar = time > ob.barTime and (isBull ? close[1] > ob.openPrice : close[1] < ob.openPrice)
+            bool wouldConfirm = confirmedBar and not na(winBar) and bar_index > winBar
+            if wouldConfirm and not plotted and f_timeFilterActive()
+                plotted   := true
+                color obColor = isBull ? bullOBColor : bearOBColor
+                int obRightTime = time + cspacer * 2
+                ob.sweepLine := line.new(ob.pivotTime, ob.pivotPrice, ob.barTime, ob.pivotPrice,
+                                         xloc=xloc.bar_time, color=sweepLineCol, width=sweepWidth, style=ls(_sweepStyleStr))
+                ob.obLine    := line.new(ob.barTime, ob.openPrice, obRightTime, ob.openPrice,
+                                         xloc=xloc.bar_time, color=obColor, width=obWidth, style=ls(_obStyleStr))
+                ob.obLabel   := label.new(obRightTime, ob.openPrice, isBull ? "+ OB" : "- OB",
+                                          xloc=xloc.bar_time, style=label.style_label_left,
+                                          color=NO_COLOR, textcolor=obColor, size=size.small,
+                                          text_font_family=font.family_monospace)
+                float sl   = f_resolveObSL(isBull, winY2, ob.scHigh, ob.scLow)
+                ob.slPrice := sl
+                ob.active  := true
+                ob.frozen  := false
+                ob.filled  := (projCalc == "Confirmation Close")
+                if obProjBool and obProjections.size() > 0 and not na(sl)
+                    float basePrice = projCalc == "Confirmation Close" ? close[1] : ob.openPrice
+                    float risk      = math.abs(basePrice - sl)
+                    ob.targetPrice := isBull ? basePrice + risk * _maxProj : basePrice - risk * _maxProj
+                    for dv in obProjections
+                        float pp = isBull ? basePrice + risk * dv : basePrice - risk * dv
+                        pln = line.new(ob.barTime, pp, ob.barTime + cspacer * 2, pp,
+                                       xloc=xloc.bar_time, color=obColor, width=1)
+                        plb = label.new(ob.barTime + cspacer, pp, "+" + str.tostring(dv, "#.#"),
+                                        xloc=xloc.bar_time,
+                                        style=isBull ? label.style_label_down : label.style_label_up,
+                                        color=NO_COLOR, textcolor=obColor, size=size.small,
+                                        text_font_family=font.family_monospace)
+                        ob.projLines.push(pln)
+                        ob.projLabels.push(plb)
+                if isBull
+                    pa1.smtBullBar := na, pa2.smtBullBar := na
+                    pb1.smtBullBar := na, pb2.smtBullBar := na
+                    pc1.smtBullBar := na, pc2.smtBullBar := na
+                else
+                    pa1.smtBearBar := na, pa2.smtBearBar := na
+                    pb1.smtBearBar := na, pb2.smtBearBar := na
+                    pc1.smtBearBar := na, pc2.smtBearBar := na
+                ob.erlPrice := erlLvlSnap
+                if not na(erlLvlSnap)
+                    int erlX = isBull ? findPrice(erlLvlSnap, t1Snap, true) : findPrice(erlLvlSnap, t1Snap, false)
+                    if erlX == t1Snap
+                        erlX := isBull ? findPrice(erlLvlSnap, t2Snap, true) : findPrice(erlLvlSnap, t2Snap, false)
+                    ob.erlLine  := line.new(erlX, erlLvlSnap, time + cspacer * 2, erlLvlSnap,
+                                            xloc=xloc.bar_time, color=erlColor, width=erlWidth, style=ls(_erlStyleStr))
+                    ob.erlLabel := label.new(erlX, erlLvlSnap, "ERL",
+                                             xloc=xloc.bar_time,
+                                             style=isBull ? label.style_label_lower_right : label.style_label_upper_right,
+                                             color=NO_COLOR, textcolor=erlColor, size=lsz(_labelSzStr),
+                                             text_font_family=font.family_monospace)
+                if showInvFVG
+                    int pOffset = math.max(0, bar_index - int((time - ob.barTime) / cspacer))
+                    ob.iFVGs := findInversionFVGs(isBull, pOffset, bar_index, ob.openPrice)
+                    if ob.iFVGs.size() > 0
+                        int ifvgEndTime = time + cspacer * 4
+                        color currentBoxCol = isBull ? bullInvBoxCol : bearInvBoxCol
+                        color currentTxtCol = isBull ? bullInvTxtCol : bearInvTxtCol
+                        for inv in ob.iFVGs
+                            inv.invBox := box.new(inv.left, inv.top, ifvgEndTime, inv.bot,
+                                                  xloc=xloc.bar_time, bgcolor=currentBoxCol, border_color=NO_COLOR)
+                            inv.invLabel := label.new(ifvgEndTime, inv.mid, isBull ? "iFVG+" : "iFVG-",
+                                                      xloc=xloc.bar_time,
+                                                      style=label.style_label_left,
+                                                      color=NO_COLOR, textcolor=currentTxtCol, size=lsz(_labelSzStr),
+                                                      text_font_family=font.family_monospace)
+                confirmed.push(ob)
+        if plotted
+            for j = pending.size() - 1 to 0
+                ob = pending.get(j)
+                if ob.active
+                    pending.remove(j)
+        else
+            for i = pending.size() - 1 to 0
+                ob = pending.get(i)
+                bool brokeThrough = time > ob.barTime and (isBull ? close[1] > ob.openPrice : close[1] < ob.openPrice)
+                bool wouldConfirmI = brokeThrough and not na(winBar) and bar_index > winBar
+                if brokeThrough and not wouldConfirmI
+                    pending.remove(i)
+
+f_extendOBLines(OrderBlock[] obs) =>
+    for ob in obs
+        if not ob.frozen
+            if not na(ob.obLine) and not ob.targetHit
+                bool shouldExtend = projCalc == "Confirmation Close" or not ob.filled
+                if shouldExtend
+                    int rightEdge = time + cspacer * 2
+                    line.set_x2(ob.obLine, rightEdge)
+                    if not na(ob.obLabel)
+                        label.set_x(ob.obLabel, rightEdge)
+            if not na(ob.erlLine) and not ob.erlHit
+                line.set_x2(ob.erlLine, time + cspacer * 2)
+
+f_checkOBInvalidation(OrderBlock[] obs, bool isBull) =>
+    bool triggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if ob.active and not ob.targetHit and not ob.frozen and not na(ob.slPrice)
+                bool invalidated = isBull ? low < ob.slPrice : high > ob.slPrice
+                if invalidated
+                    ob.active := false
+                    ob.frozen := true
+                    if discardInvalid
+                        ob.deleteOB()
+                        f_removeFrozenEntry(ob.barTime)
+                        obs.remove(j)
+                    else
+                        f_grayOutOB(ob)
+                        f_registerFrozenEntry(ob)
+                    triggered := true
+    triggered
+
+f_checkOBFillAndTarget(OrderBlock[] obs, bool isBull) =>
+    bool tgtTriggered    = false
+    bool nofillTriggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if ob.active and not ob.targetHit and not ob.frozen
+                if not ob.filled
+                    bool fillHit = isBull ? low <= ob.openPrice : high >= ob.openPrice
+                    if fillHit
+                        ob.filled := true
+                if not na(ob.targetPrice)
+                    bool tgtHit = isBull ? high >= ob.targetPrice : low <= ob.targetPrice
+                    if tgtHit
+                        ob.targetHit := true
+                        ob.active    := false
+                        ob.frozen    := true
+                        f_registerFrozenEntry(ob)
+                        if ob.filled
+                            tgtTriggered    := true
+                        else
+                            nofillTriggered := true
+    [tgtTriggered, nofillTriggered]
+
+f_checkOBERL(OrderBlock[] obs, bool isBull) =>
+    bool triggered = false
+    if obs.size() > 0
+        for j = obs.size() - 1 to 0
+            ob = obs.get(j)
+            if not ob.erlHit and not na(ob.erlPrice) and not ob.frozen
+                bool erlHitNow = isBull ? high >= ob.erlPrice : low <= ob.erlPrice
+                if erlHitNow
+                    ob.erlHit := true
+                    if not na(ob.erlLine)
+                        line.set_x2(ob.erlLine, time)
+                    triggered := true
+    triggered
+
+method deleteAnchor(AnchorState self) =>
+    if not na(self.p1.lineBull)
+        self.p1.lineBull.delete()
+    if not na(self.p1.lineBear)
+        self.p1.lineBear.delete()
+    if not na(self.p1.labelBull)
+        self.p1.labelBull.delete()
+    if not na(self.p1.labelBear)
+        self.p1.labelBear.delete()
+    if not na(self.p2.lineBull)
+        self.p2.lineBull.delete()
+    if not na(self.p2.lineBear)
+        self.p2.lineBear.delete()
+    if not na(self.p2.labelBull)
+        self.p2.labelBull.delete()
+    if not na(self.p2.labelBear)
+        self.p2.labelBear.delete()
+
+f_inv1H(float h, float l) => inverse1 ? 1.0 / l : h
+f_inv1L(float h, float l) => inverse1 ? 1.0 / h : l
+f_inv2H(float h, float l) => inverse2 ? 1.0 / l : h
+f_inv2L(float h, float l) => inverse2 ? 1.0 / h : l
+
+f_processAnchor(AnchorState a, bool isBull, float curH, float curL, float s1H, float s1L, float s2H, float s2L) =>
+    if time >= a.startTime and not na(a.anchorH)
+        string combinedTicker = s1Ticker + "+" + s2Ticker
+        int    currentBucket  = math.floor((time - a.startTime) / htfMsec) * htfMsec + a.startTime
+        if na(a.bucket) or currentBucket != a.bucket
+            a.bucket     := currentBucket
+            a.bucketH    := curH
+            a.bucketL    := curL
+            a.p1.bucketH := s1H
+            a.p1.bucketL := s1L
+            a.p2.bucketH := s2H
+            a.p2.bucketL := s2L
+        else
+            if curH > a.bucketH
+                a.bucketH := curH
+            if curL < a.bucketL
+                a.bucketL := curL
+            a.p1.bucketH := math.max(a.p1.bucketH, s1H)
+            a.p1.bucketL := math.min(a.p1.bucketL, s1L)
+            a.p2.bucketH := math.max(a.p2.bucketH, s2H)
+            a.p2.bucketL := math.min(a.p2.bucketL, s2L)
+        if isBull
+            if not na(a.p1.anchorL)
+                if not a.p1.foundBull and (a.bucketL - a.anchorL) * (a.p1.bucketL - a.p1.anchorL) < 0
+                    f_drawPair(a.p1, true, a.anchorL, a.bucketL, a.startTime, a.bucket)
+            if useSmtPair2 and not na(a.p2.anchorL)
+                if not a.p2.foundBull and (a.bucketL - a.anchorL) * (a.p2.bucketL - a.p2.anchorL) < 0
+                    f_drawPair(a.p2, true, a.anchorL, a.bucketL, a.startTime, a.bucket)
+                    f_syncLabels(true, a.p1, a.p2, combinedTicker)
+        else
+            if not na(a.p1.anchorH)
+                if not a.p1.foundBear and (a.bucketH - a.anchorH) * (a.p1.bucketH - a.p1.anchorH) < 0
+                    f_drawPair(a.p1, false, a.anchorH, a.bucketH, a.startTime, a.bucket)
+            if useSmtPair2 and not na(a.p2.anchorH)
+                if not a.p2.foundBear and (a.bucketH - a.anchorH) * (a.p2.bucketH - a.p2.anchorH) < 0
+                    f_drawPair(a.p2, false, a.anchorH, a.bucketH, a.startTime, a.bucket)
+                    f_syncLabels(false, a.p1, a.p2, combinedTicker)
+        if a.p1.foundBull or a.p1.foundBear or (useSmtPair2 and (a.p2.foundBull or a.p2.foundBear))
+            if na(a.exH)
+                a.exH := high
+                a.exL := low
+            else
+                if high > a.exH
+                    a.exH := high
+                    if not isBull
+                        if not na(a.p1.lineBear)
+                            if (a.exH - a.anchorH) * (s1H - a.p1.anchorH) < 0
+                                f_updateSmtLine(false, a.exH, currentBucket, a.p1.lineBear)
+                                a.p1.smtBearBar := bar_index
+                                if useSmtPair2 and a.p2.foundBear
+                                    f_syncLabels(false, a.p1, a.p2, combinedTicker)
+                                else
+                                    if not na(a.p1.labelBear)
+                                        a.p1.labelBear.delete()
+                                    a.p1.labelBear := f_drawSmtLabel(false, a.p1.lineBear, a.p1.ticker)
+                            else
+                                a.p1.smtBearBar := na
+                        if useSmtPair2 and not na(a.p2.lineBear)
+                            if (a.exH - a.anchorH) * (s2H - a.p2.anchorH) < 0
+                                f_updateSmtLine(false, a.exH, currentBucket, a.p2.lineBear)
+                                a.p2.smtBearBar := bar_index
+                                f_syncLabels(false, a.p1, a.p2, combinedTicker)
+                            else
+                                a.p2.smtBearBar := na
+                if low < a.exL
+                    a.exL := low
+                    if isBull
+                        if not na(a.p1.lineBull)
+                            if (a.exL - a.anchorL) * (s1L - a.p1.anchorL) < 0
+                                f_updateSmtLine(true, a.exL, currentBucket, a.p1.lineBull)
+                                a.p1.smtBullBar := bar_index
+                                if useSmtPair2 and a.p2.foundBull
+                                    f_syncLabels(true, a.p1, a.p2, combinedTicker)
+                                else
+                                    if not na(a.p1.labelBull)
+                                        a.p1.labelBull.delete()
+                                    a.p1.labelBull := f_drawSmtLabel(true, a.p1.lineBull, a.p1.ticker)
+                            else
+                                a.p1.smtBullBar := na
+                        if useSmtPair2 and not na(a.p2.lineBull)
+                            if (a.exL - a.anchorL) * (s2L - a.p2.anchorL) < 0
+                                f_updateSmtLine(true, a.exL, currentBucket, a.p2.lineBull)
+                                a.p2.smtBullBar := bar_index
+                                f_syncLabels(true, a.p1, a.p2, combinedTicker)
+                            else
+                                a.p2.smtBullBar := na
+    float(na)
+
+f_crossAnchorResolve(FVG f, bool isBull) =>
+    [wBar0, wLine0, wY2_0] = f_resolveBestSmt(f.anchors.get(0).p1, f.anchors.get(0).p2, isBull)
+    [wBar1, wLine1, wY2_1] = f_resolveBestSmt(f.anchors.get(1).p1, f.anchors.get(1).p2, isBull)
+    [wBar2, wLine2, wY2_2] = f_resolveBestSmt(f.anchors.get(2).p1, f.anchors.get(2).p2, isBull)
+    float best = na
+    if not na(wY2_0)
+        best := wY2_0
+    if not na(wY2_1)
+        best := na(best) ? wY2_1 : (isBull ? math.min(best, wY2_1) : math.max(best, wY2_1))
+    if not na(wY2_2)
+        best := na(best) ? wY2_2 : (isBull ? math.min(best, wY2_2) : math.max(best, wY2_2))
+    bool keep0 = not na(wY2_0) and not na(best) and (isBull ? wY2_0 <= best : wY2_0 >= best)
+    bool keep1 = not na(wY2_1) and not na(best) and (isBull ? wY2_1 <= best : wY2_1 >= best)
+    bool keep2 = not na(wY2_2) and not na(best) and (isBull ? wY2_2 <= best : wY2_2 >= best)
+    if not keep0
+        f_deleteSmtPairLine(f.anchors.get(0).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(0).p2, isBull)
+    if not keep1
+        f_deleteSmtPairLine(f.anchors.get(1).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(1).p2, isBull)
+    if not keep2
+        f_deleteSmtPairLine(f.anchors.get(2).p1, isBull)
+        f_deleteSmtPairLine(f.anchors.get(2).p2, isBull)
+    int   winBar  = na
+    line  winLine = na
+    float winY2   = float(na)
+    if keep0
+        winBar := wBar0, winLine := wLine0, winY2 := wY2_0
+    if keep1 and (na(winBar) or (isBull ? wY2_1 <= winY2 : wY2_1 >= winY2))
+        winBar := wBar1, winLine := wLine1, winY2 := wY2_1
+    if keep2 and (na(winBar) or (isBull ? wY2_2 <= winY2 : wY2_2 >= winY2))
+        winBar := wBar2, winLine := wLine2, winY2 := wY2_2
+    [winBar, winLine, winY2]
+
+method delete(FVG self) =>
+    self.bx.delete()
+    self.mid.delete()
+    self.lbl.delete()
+    for a in self.anchors
+        a.deleteAnchor()
+    for ob in self.pendingBullOB
+        ob.deleteOB()
+    for ob in self.pendingBearOB
+        ob.deleteOB()
+    for ob in self.confirmedBullOB
+        ob.deleteOB()
+    for ob in self.confirmedBearOB
+        ob.deleteOB()
+
+method removeFVG(FVG[] self, int i) =>
+    self.get(i).delete()
+    self.remove(i)
+
+method beyondFVG(FVG self, float c) => self.bull ? c < self.lo : c > self.hi
+method inFVG(FVG self, float h, float l) => self.bull ? l < self.hi : h > self.lo
+
+[h1, h2, h3, l1, l2, l3, t1, t2, t3, htfClose1, tfTime, htfPH, htfPL] = request.security(syminfo.tickerid, resolvedHTF,
+     [high[1], high[2], high[3], low[1], low[2], low[3], time[1], time[2], time[3], close[1], time, htfPivotH(), htfPivotL()],
+     lookahead=barmerge.lookahead_on)
+
+[s1_h1, s1_h2, s1_h3, s1_l1, s1_l2, s1_l3, smt1H_raw, smt1L_raw] = request.security(resolvedSmtPair, resolvedHTF,
+     [high[1], high[2], high[3], low[1], low[2], low[3], high, low],
+     lookahead=barmerge.lookahead_on)
+
+float smt1H = f_inv1H(smt1H_raw, smt1L_raw)
+float smt1L = f_inv1L(smt1H_raw, smt1L_raw)
+
+var float s2_h1 = na, var float s2_h2 = na, var float s2_h3 = na
+var float s2_l1 = na, var float s2_l2 = na, var float s2_l3 = na
+var float smt2H = na, var float smt2L = na
+if useSmtPair2
+    [_a, _b, _c, _d, _e, _f, _g, _h] = request.security(smtPair2, resolvedHTF,
+         [high[1], high[2], high[3], low[1], low[2], low[3], high, low],
+         lookahead=barmerge.lookahead_on)
+    s2_h1 := _a, s2_h2 := _b, s2_h3 := _c, s2_l1 := _d, s2_l2 := _e, s2_l3 := _f
+    smt2H := f_inv2H(_g, _h)
+    smt2L := f_inv2L(_g, _h)
+
+max_bars_back(high, 1000)
+max_bars_back(low,  1000)
+max_bars_back(time, 1000)
+
+newHTFBar = ta.change(tfTime) != 0
+
+var float liveHigh = na, var float liveLow = na
+if newHTFBar
+    liveHigh := high, liveLow := low
+else
+    if high > liveHigh
+        liveHigh := high
+    if low < liveLow
+        liveLow := low
+
+int _hBars = ta.highestbars(3)
+int _lBars = ta.lowestbars(3)
+
+var FVG[] fvgs = array.new<FVG>()
+
+f_makeAnchorState(int sTime, float aH, float aL, float p1H, float p1L, float p2H, float p2L) =>
+    SmtPair p1 = SmtPair.new(p1H, p1L, na, na, false, false, na, na, na, na, s1Ticker, na, na)
+    SmtPair p2 = SmtPair.new(p2H, p2L, na, na, false, false, na, na, na, na, s2Ticker, na, na)
+    AnchorState.new(sTime, aH, aL, na, na, na, na, na, p1, p2)
+
+f_makeAnchors() =>
+    AnchorState[] anchors = array.new<AnchorState>()
+    anchors.push(f_makeAnchorState(int(t1), h1, l1,
+                 f_inv1H(s1_h1, s1_l1), f_inv1L(s1_h1, s1_l1),
+                 f_inv2H(s2_h1, s2_l1), f_inv2L(s2_h1, s2_l1)))
+    anchors.push(f_makeAnchorState(int(t2), h2, l2,
+                 f_inv1H(s1_h2, s1_l2), f_inv1L(s1_h2, s1_l2),
+                 f_inv2H(s2_h2, s2_l2), f_inv2L(s2_h2, s2_l2)))
+    anchors.push(f_makeAnchorState(int(t3), h3, l3,
+                 f_inv1H(s1_h3, s1_l3), f_inv1L(s1_h3, s1_l3),
+                 f_inv2H(s2_h3, s2_l3), f_inv2L(s2_h3, s2_l3)))
+    anchors
+
+f_seedPivots(AnchorPivot[] stH, AnchorPivot[] stL, int seedFromTime) =>
+    int span = math.min((time - seedFromTime) / cspacer, 500)
+    if span >= 2
+        for j = span - 1 to 1
+            int bt = time[j]
+            if bt >= seedFromTime
+                float h_prev = high[j + 1]
+                float h_cur  = high[j]
+                float h_next = high[j - 1]
+                float l_prev = low[j + 1]
+                float l_cur  = low[j]
+                float l_next = low[j - 1]
+                if h_cur > h_prev and h_cur > h_next
+                    stH.push(AnchorPivot.new(h_cur, bt, false))
+                if l_cur < l_prev and l_cur < l_next
+                    stL.push(AnchorPivot.new(l_cur, bt, false))
+
+pushFVG(bool isBull) =>
+    float top    = isBull ? l1 : l3
+    float bot    = isBull ? h3 : h1
+    float fmid   = (top + bot) / 2
+    int   ltX    = int(t3)
+    int   rtX    = time
+    float erl    = isBull ? math.max(h1, h2) : math.min(l1, l2)
+    float pivLvl = isBull ? (not na(htfPL) and htfPL < bot ? htfPL : float(na))
+                          : (not na(htfPH) and htfPH > top ? htfPH : float(na))
+    bx      = box.new(ltX, top, rtX, bot, xloc=xloc.bar_time, bgcolor=fvgCol, border_color=NO_COLOR, border_width=0)
+    midLine = line.new(ltX, fmid, rtX, fmid, xloc=xloc.bar_time, color=showCE ? ceColor : NO_COLOR, style=ls(_ceStyleStr), width=ceWidth)
+    string fvgTag = (isBull ? "FVG+ " : "FVG- ") + f_tfLabel(resolvedHTF)
+    lbl     = label.new(rtX, fmid, fvgTag,
+                        xloc=xloc.bar_time,
+                        style=label.style_label_right,
+                        textcolor=color.new(#787b86, 0), color=NO_COLOR, size=lsz(_labelSzStr),
+                        text_font_family=font.family_monospace)
+    PivotTier     newPivH = PivotTier.new(array.new<SwingPivot>(), array.new<SwingPivot>(), array.new<SwingPivot>())
+    PivotTier     newPivL = PivotTier.new(array.new<SwingPivot>(), array.new<SwingPivot>(), array.new<SwingPivot>())
+    AnchorPivot[] newStH  = array.new<AnchorPivot>()
+    AnchorPivot[] newItH  = array.new<AnchorPivot>()
+    AnchorPivot[] newLtH  = array.new<AnchorPivot>()
+    AnchorPivot[] newStL  = array.new<AnchorPivot>()
+    AnchorPivot[] newItL  = array.new<AnchorPivot>()
+    AnchorPivot[] newLtL  = array.new<AnchorPivot>()
+    f_seedPivots(newStH, newStL, int(t3))
+    fvgs.push(FVG.new(
+         bx, midLine, lbl, top, bot, isBull, false, erl, pivLvl, bar_index,
+         f_makeAnchors(),
+         newPivH, newPivL,
+         newStH, newItH, newLtH,
+         newStL, newItL, newLtL,
+         array.new<OrderBlock>(), array.new<OrderBlock>(),
+         array.new<OrderBlock>(), array.new<OrderBlock>(),
+         false, false, false, false))
+
+if validTF and newHTFBar
+    if l1 > h3 and (bias == "Neutral" or bias == "Bullish")
+        pushFVG(true)
+    if h1 < l3 and (bias == "Neutral" or bias == "Bearish")
+        pushFVG(false)
+
+plotBullSL     := false
+plotBearSL     := false
+plotBullTarget := false
+plotBearTarget := false
+plotBullNofill := false
+plotBearNofill := false
+plotBullERL    := false
+plotBearERL    := false
+
+fireSMTFVG      := false
+fireModelActive := false
+fireProjHit     := false
+fireERLHit      := false
+alertSmtMsg     := ""
+alertObMsg      := ""
+alertProjMsg    := ""
+alertErlMsg     := ""
+
+bool _ltfFvgUp = low > high[2] and close[1] > high[2]
+bool _ltfFvgDn = high < low[2] and close[1] < low[2]
+if _ltfFvgUp
+    g_bullFVGArray.push(InversionFVG.new(time[1], low, na, high[2], math.avg(low, high[2]), 1, 0, bar_index, na, na, na, false, na))
+if _ltfFvgDn
+    g_bearFVGArray.push(InversionFVG.new(time[1], low[2], na, high, math.avg(low[2], high), -1, 0, bar_index, na, na, na, false, na))
+
+fvgManage(g_bullFVGArray, g_bullInvArray)
+fvgManage(g_bearFVGArray, g_bullInvArray)
+invManage(g_bullInvArray)
+invManage(g_bearInvArray)
+
+int i = 0
+while i < fvgs.size()
+    FVG  f       = fvgs.get(i)
+    bool deleted = false
+
+    bool bullTradeActive = f_hasActiveOB(f.confirmedBullOB)
+    bool bearTradeActive = f_hasActiveOB(f.confirmedBearOB)
+    bool anyTradeActive  = bullTradeActive or bearTradeActive
+
+    if not f.fvgFrozen
+        if not f.mitigated
+            box.set_right(f.bx, time)
+            line.set_x2(f.mid, time)
+            label.set_x(f.lbl, time)
+
+        bool fvgBroken = f.bull ? low <= f.lo : high >= f.hi
+        if not f.mitigated and fvgBroken
+            f.mitigated := true
+            box.set_right(f.bx, time)
+            line.set_x2(f.mid, time)
+            label.set_x(f.lbl, time)
+
+        if newHTFBar and not anyTradeActive
+            if f.beyondFVG(htfClose1)
+                fvgs.removeFVG(i)
+                deleted := true
+
+        if not deleted
+            if not anyTradeActive
+                if not f.mitigated
+                    f.erlLvl := f.bull ? math.max(f.erlLvl, liveHigh) : math.min(f.erlLvl, liveLow)
+                if not f.mitigated and f.inFVG(liveHigh, liveLow)
+                    f.mitigated := true
+                if f.mitigated and (f.bull ? liveHigh > f.erlLvl : liveLow < f.erlLvl)
+                    fvgs.removeFVG(i)
+                    deleted := true
+                if not deleted and not na(f.pivotLvl) and (f.bull ? liveLow < f.pivotLvl : liveHigh > f.pivotLvl)
+                    fvgs.removeFVG(i)
+                    deleted := true
+
+    if not deleted
+        if not f.done
+            for a in f.anchors
+                f_processAnchor(a, f.bull, high, low, smt1H, smt1L, smt2H, smt2L)
+
+            [wBarBull, wLineBull, wY2Bull] = f_crossAnchorResolve(f, true)
+            [wBarBear, wLineBear, wY2Bear] = f_crossAnchorResolve(f, false)
+
+            f_ictSwing(f.pivotH, f.stHighAnc, f.itHighAnc, f.ltHighAnc, true,  _hBars, _lBars)
+            f_ictSwing(f.pivotL, f.stLowAnc,  f.itLowAnc,  f.ltLowAnc,  false, _hBars, _lBars)
+
+            if f.bull
+                f_processSweeps(f.ltLowAnc,  f.itLowAnc,  f.stLowAnc,  f.pendingBullOB, true)
+                f_confirm(f.pendingBullOB, f.confirmedBullOB, true, wBarBull, wLineBull, wY2Bull,
+                          f.erlLvl, f.anchors.get(0).startTime, f.anchors.get(1).startTime,
+                          f.anchors.get(0).p1, f.anchors.get(0).p2,
+                          f.anchors.get(1).p1, f.anchors.get(1).p2,
+                          f.anchors.get(2).p1, f.anchors.get(2).p2)
+            else
+                f_processSweeps(f.ltHighAnc, f.itHighAnc, f.stHighAnc, f.pendingBearOB, false)
+                f_confirm(f.pendingBearOB, f.confirmedBearOB, false, wBarBear, wLineBear, wY2Bear,
+                          f.erlLvl, f.anchors.get(0).startTime, f.anchors.get(1).startTime,
+                          f.anchors.get(0).p1, f.anchors.get(0).p2,
+                          f.anchors.get(1).p1, f.anchors.get(1).p2,
+                          f.anchors.get(2).p1, f.anchors.get(2).p2)
+
+        f_extendOBLines(f.confirmedBullOB)
+        f_extendOBLines(f.confirmedBearOB)
+
+        if f.bull
+            [bullTgt, bullNofill] = f_checkOBFillAndTarget(f.confirmedBullOB, true)
+            if bullTgt
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBullTarget := true
+                fireProjHit    := true
+                alertProjMsg   := "+ " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF) + " Projection Target Hit"
+            if bullNofill
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBullNofill := true
+            if f_checkOBERL(f.confirmedBullOB, true)
+                plotBullERL := true
+                fireERLHit  := true
+                alertErlMsg := "+ " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF) + " External Range Liquidity Hit"
+            if not f.fvgFrozen
+                if f_checkOBInvalidation(f.confirmedBullOB, true)
+                    plotBullSL := true
+                    if not discardInvalid
+                        f.done      := true
+                        f.fvgFrozen := true
+        else
+            [bearTgt, bearNofill] = f_checkOBFillAndTarget(f.confirmedBearOB, false)
+            if bearTgt
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBearTarget := true
+                fireProjHit    := true
+                alertProjMsg   := "- " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF) + " Projection Target Hit"
+            if bearNofill
+                f.done         := true
+                f.fvgFrozen    := true
+                plotBearNofill := true
+            if f_checkOBERL(f.confirmedBearOB, false)
+                plotBearERL := true
+                fireERLHit  := true
+                alertErlMsg := "- " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF) + " External Range Liquidity Hit"
+            if not f.fvgFrozen
+                if f_checkOBInvalidation(f.confirmedBearOB, false)
+                    plotBearSL := true
+                    if not discardInvalid
+                        f.done      := true
+                        f.fvgFrozen := true
+
+        if not f.smtAlerted and not f.done
+            bool smtNowFound = false
+            for a in f.anchors
+                if (f.bull ? a.p1.foundBull : a.p1.foundBear) or (useSmtPair2 and (f.bull ? a.p2.foundBull : a.p2.foundBear))
+                    smtNowFound := true
+                    break
+            if smtNowFound
+                f.smtAlerted := true
+                fireSMTFVG   := true
+                alertSmtMsg  := (f.bull ? "+ " : "- ") + f_tfLabel(resolvedLTF) + " FVG and SMT formed, waiting for Entry"
+
+        if not f.obAlerted
+            bool obNowActive = f_hasActiveOB(f.bull ? f.confirmedBullOB : f.confirmedBearOB)
+            if obNowActive
+                f.obAlerted     := true
+                fireModelActive := true
+                alertObMsg      := "FVG + SMT Model Active " + f_tfLabel(resolvedLTF) + "-" + f_tfLabel(resolvedHTF)
+
+        i += 1
+
+while fvgs.size() > MAX_FVGS
+    fvgs.removeFVG(0)
+
+_shapeInvalid = invalidShape == "x" ? shape.xcross : invalidShape == "+" ? shape.cross : shape.diamond
+_shapeTarget  = targetShape  == "x" ? shape.xcross : targetShape  == "+" ? shape.cross : shape.diamond
+_shapeNofill  = nofillShape  == "x" ? shape.xcross : nofillShape  == "+" ? shape.cross : shape.diamond
+_shapeERL     = erlShape     == "x" ? shape.xcross : erlShape     == "+" ? shape.cross : shape.diamond
+
+plotshape(showInvalid    and plotBullSL,     title="Bull SL",      style=_shapeInvalid, location=location.belowbar, color=bullInvalidCol, size=size.auto)
+plotshape(showInvalid    and plotBearSL,     title="Bear SL",      style=_shapeInvalid, location=location.abovebar, color=bearInvalidCol, size=size.auto)
+plotshape(showTargetMark and plotBullTarget, title="Bull Target",  style=_shapeTarget,  location=location.abovebar, color=bullTargetCol,  size=size.auto)
+plotshape(showTargetMark and plotBearTarget, title="Bear Target",  style=_shapeTarget,  location=location.belowbar, color=bearTargetCol,  size=size.auto)
+plotshape(showNofill     and plotBullNofill, title="Bull No Fill", style=_shapeNofill,  location=location.abovebar, color=bullNofillCol,  size=size.auto)
+plotshape(showNofill     and plotBearNofill, title="Bear No Fill", style=_shapeNofill,  location=location.belowbar, color=bearNofillCol,  size=size.auto)
+plotshape(showERLMarker  and plotBullERL,    title="Bull ERL",     style=_shapeERL,     location=location.abovebar, color=bullERLCol,     size=size.auto)
+plotshape(showERLMarker  and plotBearERL,    title="Bear ERL",     style=_shapeERL,     location=location.belowbar, color=bearERLCol,     size=size.auto)
+
+if enableAlerts
+    if alertSMTFVG      and fireSMTFVG      and str.length(alertSmtMsg) > 0
+        alert(alertSmtMsg, alert.freq_once_per_bar)
+    if alertModelActive and fireModelActive and str.length(alertObMsg) > 0
+        alert(alertObMsg, alert.freq_once_per_bar)
+    if alertProjHit     and fireProjHit     and str.length(alertProjMsg) > 0
+        alert("FVG + SMT " + alertProjMsg, alert.freq_once_per_bar)
+    if alertERLHit      and fireERLHit      and str.length(alertErlMsg) > 0
+        alert("FVG + SMT " + alertErlMsg, alert.freq_once_per_bar)
+
+f_dashSize(string s) =>
+    switch s
+        "Tiny"   => size.tiny
+        "Small"  => size.small
+        "Normal" => size.normal
+        "Large"  => size.large
+        "Huge"   => size.huge
+        => size.small
+
+f_tableRow(table t, int row, string txt, color txtColor, color bgColor, string sz) =>
+    table.cell(t, 0, row, txt, text_color=txtColor, bgcolor=bgColor, text_size=sz,
+               text_halign=text.align_center, text_font_family=font.family_monospace)
+    table.cell(t, 1, row, "", text_color=txtColor, bgcolor=bgColor, text_size=sz,
+               text_halign=text.align_center, text_font_family=font.family_monospace)
+    table.merge_cells(t, 0, row, 1, row)
+
+f_qt_durLabel(int mins) =>
+    string res = na
+    if mins >= 1440 and mins % 1440 == 0
+        res := str.tostring(int(mins / 1440)) + "D"
+    else if mins >= 60 and mins % 60 == 0
+        res := str.tostring(int(mins / 60)) + "H"
+    else
+        res := str.tostring(mins) + "m"
+    res
+
+f_qt_modelLabel(string m) =>
+    m == qt_mdl2 ? "Daye's Cycles" : m == qt_mdl3 ? "Zeussy's Cycles" : "Free Cycles"
+
+var table infoTable = na
+if barstate.islast
+    if boolTable
+        tfStr        = f_timeFilterLabel()
+        string p1tag = _smtAutoFound ? " (auto)" : ""
+        string p2tag = useSmtPair2   ? " / " + f_cleanTicker(smtPair2) + " (2nd)" : ""
+        pairStr      = syminfo.ticker + " / " + f_cleanTicker(resolvedSmtPair) + p1tag + p2tag
+        bool   showWarning = autoSMT and not _smtAutoFound
+        string warnMsg     = "⚠ No auto SMT for '" + syminfo.ticker + "' — using " + f_cleanTicker(smtPair) + " (manual)"
+
+        int    qtDurMin   = qt_mdl == qt_mdl1 ? qt_free_day : qt_mdl == qt_mdl2 ? 360 : 270
+        string qtCycleLbl = f_qt_durLabel(qtDurMin)
+        string qtSubLbl   = f_qt_durLabel(int(math.max(1, math.round(qtDurMin / float(qt_mdl == qt_mdl1 ? qt_X_ : qt_mdl == qt_mdl2 ? 4 : 3)))))
+        string smt1Tag    = _smtAutoFound ? " (Auto)" : ""
+        string smt2Tag    = autoSMT ? " (Auto)" : ""
+        string smt2Line   = useSmtPair2 ? "\nSMT2: " + f_cleanTicker(smtPair2) + smt2Tag + (inverse2 ? " (Inv)" : "") : ""
+        string qtPairStr  = "Ticker: " + syminfo.ticker + "\nSMT1: " + f_cleanTicker(resolvedSmtPair) + smt1Tag + smt2Line
+        string pairBlock  = enable_qt ? qtPairStr : pairStr
+
+        int rowCount = 1
+        if biasInfo or alignmentInfo or (timeInfo and str.length(tfStr) > 0)
+            rowCount += 1
+        if dateInfo
+            rowCount += 1
+        if enable_qt
+            rowCount += 1
+        if showWarning
+            rowCount += 1
+
+        if na(infoTable)
+            infoTable := table.new(f_tablePosH(tableloc1, tableloc2), 2, rowCount,
+                          bgcolor=dashboardBgColor,
+                          border_color=dashboardBorderColor,
+                          border_width=dashboardBorderWidth,
+                          frame_color=dashboardFrameColor,
+                          frame_width=dashboardFrameWidth)
+
+        dTextSize = f_dashSize(dashboardSize)
+
+        string titleTxt = alignmentInfo ? "Forever Model (" + f_tfLabel(resolvedLTF) + " - " + f_tfLabel(resolvedHTF) + ")" : "Forever Model"
+        f_tableRow(infoTable, 0, titleTxt, dashboardTextColor, dashboardBgColor, dTextSize)
+
+        int currentRow = 1
+        if biasInfo or alignmentInfo or (timeInfo and str.length(tfStr) > 0)
+            biasColor = bias == "Bullish" ? color.new(#00c853, 0) : bias == "Bearish" ? color.new(#d50000, 0) : dashboardTextColor
+            biasLine  = biasInfo ? "Bias : " + bias : ""
+            timeLine  = (timeInfo and str.length(tfStr) > 0) ? tfStr : ""
+            combined  = biasLine + (biasLine != "" ? "\n\n" : "") + pairBlock + (timeLine != "" ? "\n\n" : "") + timeLine
+            f_tableRow(infoTable, currentRow, combined, biasColor, dashboardBgColor, dTextSize)
+            currentRow += 1
+
+        if dateInfo
+            f_tableRow(infoTable, currentRow, str.format_time(time_close, "dd MMM yyyy", f_dashTz()), dashboardTextColor, dashboardBgColor, dTextSize)
+            currentRow += 1
+
+        if enable_qt
+            string cycleTxt = "Cycle Mode\n" + f_tfLabel(resolvedLTF) + " · " + qtCycleLbl + " SMT setups\n" + f_qt_modelLabel(qt_mdl) + " · Q = " + qtSubLbl
+            f_tableRow(infoTable, currentRow, cycleTxt, dashboardTextColor, dashboardBgColor, dTextSize)
+            currentRow += 1
+
+        if showWarning
+            warnBg  = color.new(#cc0000, 0)
+            warnTxt = color.new(color.white, 0)
+            f_tableRow(infoTable, currentRow, warnMsg, warnTxt, warnBg, dTextSize)
+
+qt_get_style(string s) =>
+    s == 'Dashed' ? line.style_dashed : s == 'Dotted' ? line.style_dotted : line.style_solid
+
+f_qt_get_lbl(string[] arr, int idx, bool extime_check) =>
+    if idx >= 1 and idx <= arr.size() and (qt_mdl == qt_mdl3 ? not extime_check : true)
+        arr.get(idx - 1)
+    else
+        ''
+
+f_qt_update_data(CycleLayer layer, bool is_new, bool tf_vis, bool extime_check) =>
+    var float layl0 = na, var float layh0 = na, var float layc0 = na, var float layo0 = na
+    var int layt0 = na
+    if tf_vis and (qt_mdl == qt_mdl3 ? not extime_check : true)
+        if is_new
+            layt0 := time
+            layo0 := open, layh0 := high, layl0 := low, layc0 := close
+        else
+            layh0 := math.max(high, layh0)
+            layl0 := math.min(low,  layl0)
+            layc0 := close
+        layer.l := layl0, layer.h := layh0, layer.c := layc0, layer.o := layo0, layer.t := layt0
+
+f_qt_manage_layer(bool cond, bool tf_vis, CycleLayer layer, string id_text, int k, bool extime_check) =>
+    sz_ = k == 1 ? size.small : size.tiny
+    layer.limit := qt_history
+    if cond and tf_vis and (qt_mdl == qt_mdl3 ? not extime_check : true)
+        color phase_col = color.gray
+        if id_text == 'Q1' or id_text == 'W1' or id_text == 'A' or id_text == '1'
+            phase_col := qt_q1_clr
+        else if id_text == 'Q2' or id_text == 'W2' or id_text == 'M' or id_text == '2'
+            phase_col := qt_q2_clr
+        else if id_text == 'Q3' or id_text == 'W3' or id_text == 'D' or id_text == '3'
+            phase_col := qt_q3_clr
+        else if id_text == 'Q4' or id_text == 'W4' or id_text == 'X' or id_text == 'Fr' or id_text == '4'
+            phase_col := qt_q4_clr
+
+        b_c  = color.new(phase_col, qt_contrast2)
+        bg_c = layer.show_box ? color.new(phase_col, qt_contrast) : color.new(phase_col, 100)
+
+        if layer.show_line and (qt_mdl == qt_mdl3 ? not extime_check : true)
+            line.new(bar_index, low, bar_index, high, extend = extend.both, color = color.new(phase_col, 40), style = qt_get_style(layer.b_style))
+
+        if qt_mdl == qt_mdl3 ? not extime_check : true
+            nb = box.new(bar_index, high, bar_index, low, border_color = b_c, bgcolor = bg_c, border_width = layer.b_width, border_style = qt_get_style(layer.b_style))
+            layer.boxes.push(nb)
+            nl = label.new(bar_index, high, xloc=xloc.bar_index, text = layer.show_label ? id_text : '', color = color.new(color.white, 100), textcolor = phase_col, style = label.style_label_down, size = sz_)
+            layer.labels.push(nl)
+
+        while layer.boxes.size() > layer.limit
+            box.delete(layer.boxes.shift())
+            label.delete(layer.labels.shift())
+
+f_qt_update_visual(bool tf_vis, CycleLayer layer, bool extime_check) =>
+    if layer.boxes.size() > 0 and (qt_mdl == qt_mdl3 ? not extime_check : true)
+        b = layer.boxes.get(layer.boxes.size() - 1)
+        l = layer.labels.get(layer.labels.size() - 1)
+        if layer.show_box
+            box.set_top(b, layer.h)
+            box.set_bottom(b, layer.l)
+            box.set_right(b, bar_index)
+        label.set_xy(l, math.round(math.avg(box.get_left(b), bar_index)), layer.h)
+
+var Year_qt  = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Quart_qt = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Month_qt = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Week_qt  = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Day_qt   = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Sub_qt   = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Micro_qt = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_b, qt_show_l, qt_show_lbl)
+var Mini_qt  = CycleLayer.new(array.new<box>(), array.new<label>(), na, na, na, na, na, qt_history, qt_width, qt_style, qt_show_lower, false,  qt_show_lbl)
+
+var int  qt_extdaystart = time
+var line qt_new_line    = na
+
+var qt_lbl_q     = array.from('Q1', 'Q2', 'Q3', 'Q4')
+var qt_lbl_w     = array.from('W1', 'W2', 'W3', 'W4', 'Gap')
+var qt_lbl_d     = array.from('A', 'M', 'D', 'X', 'Fr', 'Sat', 'Sun')
+var qt_lbl_gen   = array.from('A', 'M', 'D', 'X')
+var qt_lbl_zeday = array.from('Lo', 'AM', 'PM', '')
+var qt_lbl_nm    = array.from('1', '2', '3', '4','Fr', 'Sat', 'Sun')
+
+if enable_qt
+    qt_tf_sec   = timeframe.in_seconds(timeframe.period)
+    qt_is_min   = qt_tf_sec >= 60 and qt_tf_sec < 86400
+    qt_is_year  = qt_tf_sec == 604800
+    qt_is_quart = qt_tf_sec == 86400
+    qt_is_mon   = qt_is_min and timeframe.multiplier >= 240
+    qt_is_week  = qt_is_min and timeframe.multiplier >= 60 and timeframe.multiplier <= 120
+    qt_is_day   = qt_is_min and timeframe.multiplier >= 15 and timeframe.multiplier <= 30
+    qt_is_sub   = qt_is_min and timeframe.multiplier >= 3 and timeframe.multiplier <= 10
+    qt_is_micro = qt_is_min and timeframe.multiplier >= 1 and timeframe.multiplier <= 2
+
+    qt_dur_h    = 60 * 60 * 1000
+    qt_dur_m    = 60 * 1000
+    qt_msDay    = 24 * 60 * 60 * 1000
+
+    qt_dur_day   = qt_mdl == qt_mdl1 ? qt_free_day * qt_dur_m : qt_mdl == qt_mdl2 ? 6 * qt_dur_h : 270 * qt_dur_m
+    qt_X         = qt_mdl == qt_mdl1 ? qt_X_ : qt_mdl == qt_mdl2 ? 4 : 3
+    qt_dur_sub   = qt_dur_day / qt_X
+    qt_dur_micro = qt_dur_sub / qt_X
+    qt_dur_mini  = qt_dur_micro / qt_X
+
+    qt_st_h = qt_mdl == qt_mdl1 ? qt_start_h : qt_mdl == qt_mdl2 ? 18 : 2
+    qt_st_m = qt_mdl == qt_mdl1 ? qt_start_m : qt_mdl == qt_mdl2 ? 00 : 30
+
+    qt_yy  = year(time, qt_tz)
+    qt_mo  = month(time, qt_tz)
+    qt_dom = dayofmonth(time, qt_tz)
+
+    qt_dayStartToday = timestamp(qt_tz, qt_yy, qt_mo, qt_dom, qt_st_h, qt_st_m)
+    qt_dayStart      = time >= qt_dayStartToday ? qt_dayStartToday : qt_dayStartToday - qt_msDay
+
+    if timeframe.change("1D")
+        qt_extdaystart := time
+
+    qt_extimestart   = timestamp(qt_tz, qt_yy, qt_mo, qt_dom, 16, 00)
+    qt_extimefinish  = timestamp(qt_tz, qt_yy, qt_mo, qt_dom, 02, 30)
+    qt_extime        = time > qt_extimestart or (time >= qt_extdaystart and time < qt_extimefinish)
+
+    qt_yy_c  = year(qt_dayStart, qt_tz)
+    qt_mo_c  = month(qt_dayStart, qt_tz)
+    qt_dow_c = dayofweek(qt_dayStart, qt_tz)
+
+    qYear_val = qt_mo_c <= 3 ? 1 : qt_mo_c <= 6 ? 2 : qt_mo_c <= 9 ? 3 : 4
+
+    qs_m_val    = math.floor((qt_mo_c - 1) / 3) * 3 + 1
+    qs_t_val    = timestamp(qt_tz, qt_yy_c, qs_m_val, 1, qt_st_h, 0)
+    qe_t_val    = timestamp(qt_tz, qt_yy_c, qs_m_val + 3, 1, qt_st_h, 0)
+    q_dur_val   = qe_t_val - qs_t_val
+    q2Month_val = int(math.floor((time - qs_t_val) / q_dur_val * 4)) + 1
+    q2Month_val := math.max(1, math.min(4, q2Month_val))
+
+    monday_t_val = qt_dayStart - (qt_dow_c == dayofweek.sunday ? -1 : qt_dow_c - 2) * qt_msDay
+    mon_d_val    = dayofmonth(monday_t_val, qt_tz)
+
+    dow_1st_val = ((1 - (mon_d_val - 1) % 7 + 7) % 7) + 1
+    first_mon_m = dow_1st_val == dayofweek.monday ? 1 :
+                  dow_1st_val == dayofweek.tuesday ? 7 :
+                  dow_1st_val == dayofweek.wednesday ? 6 :
+                  dow_1st_val == dayofweek.thursday ? 5 :
+                  dow_1st_val == dayofweek.friday ? 4 :
+                  dow_1st_val == dayofweek.saturday ? 3 : 2
+
+    week_idx_val = math.round((mon_d_val - first_mon_m) / 7)
+    qMonth_val   = week_idx_val + 1
+
+    qWeek_val = qt_dow_c == dayofweek.sunday ? 1 : qt_dow_c == dayofweek.monday ? 2 : qt_dow_c == dayofweek.tuesday ? 3 : qt_dow_c == dayofweek.wednesday ? 4 : qt_dow_c == dayofweek.thursday ? 5 : qt_dow_c == dayofweek.friday ? 6 : qt_dow_c == dayofweek.saturday ? 7 : 0
+
+    msFromDay_val = (time - qt_dayStart) % qt_msDay
+    qDay_val      = int(math.floor(msFromDay_val / qt_dur_day)) + 1
+    msInmain_val  = msFromDay_val % qt_dur_day
+    qsub_val      = int(math.floor(msInmain_val / qt_dur_sub)) + 1
+    msInSub_val   = msFromDay_val % qt_dur_sub
+    qMicro_val    = int(math.max(1, math.min(qt_X, int(math.floor(msInSub_val / qt_dur_micro)) + 1)))
+    msInmicro_val = msFromDay_val % qt_dur_micro
+    qMini_val     = int(math.max(1, math.min(qt_X, int(math.floor(msInmicro_val / qt_dur_mini)) + 1)))
+
+    new_year_qt  = nz(ta.change(qYear_val)) != 0
+    new_quart_qt = nz(ta.change(q2Month_val)) != 0
+    new_month_qt = nz(ta.change(qMonth_val)) != 0
+    new_week_qt  = nz(ta.change(qWeek_val)) != 0
+    new_daily_qt = nz(ta.change(qDay_val)) != 0
+    new_sub_qt   = nz(ta.change(qsub_val)) != 0
+    new_micro_qt = nz(ta.change(qMicro_val)) != 0
+    new_mini_qt  = nz(ta.change(qMini_val)) != 0
+
+    f_qt_update_data(Year_qt,  qt_mdl == qt_mdl3 ? false : new_year_qt,  qt_is_year, qt_extime)
+    f_qt_update_data(Quart_qt, qt_mdl == qt_mdl3 ? false : new_quart_qt, qt_is_quart or (qt_is_year and qt_show_lower), qt_extime)
+    f_qt_update_data(Month_qt, qt_mdl == qt_mdl3 ? false : new_month_qt, qt_is_mon   or (qt_is_quart and qt_show_lower), qt_extime)
+    f_qt_update_data(Week_qt,  qt_mdl == qt_mdl3 ? false : new_week_qt,  qt_is_week  or (qt_is_mon and qt_show_lower), qt_extime)
+    f_qt_update_data(Day_qt,   new_daily_qt,                             qt_is_day   or (qt_is_week and qt_show_lower), qt_extime)
+    f_qt_update_data(Sub_qt,   new_sub_qt or new_daily_qt,               qt_is_sub   or (qt_is_day and qt_show_lower), qt_extime)
+    f_qt_update_data(Micro_qt, new_micro_qt,                             qt_is_micro or (qt_is_sub and qt_show_lower), qt_extime)
+    f_qt_update_data(Mini_qt,  new_mini_qt,                              qt_is_micro and qt_show_lower, qt_extime)
+
+    yearlb_qt = qt_mdl == qt_mdl3 ? "" : f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_q, qYear_val, qt_extime)
+    quarlb_qt = qt_mdl == qt_mdl3 ? "" : f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_q, q2Month_val, qt_extime)
+    montlb_qt = qt_mdl == qt_mdl3 ? "" : f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_w, qMonth_val, qt_extime)
+    weeklb_qt = qt_mdl == qt_mdl3 ? "" : f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_d, qWeek_val, qt_extime)
+    daylb_qt  = f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : (qt_mdl == qt_mdl3 ? qt_lbl_zeday : qt_lbl_gen), qDay_val, qt_extime)
+    sublb_qt  = f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_gen, qsub_val, qt_extime)
+    miclb_qt  = f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_gen, qMicro_val, qt_extime)
+    minlb_qt  = f_qt_get_lbl(qt_use_nm ? qt_lbl_nm : qt_lbl_gen, qMini_val, qt_extime)
+
+    f_qt_manage_layer(qt_mdl == qt_mdl3 ? false : new_year_qt,  qt_is_year, Year_qt,  yearlb_qt, 1, qt_extime)
+    f_qt_manage_layer(qt_mdl == qt_mdl3 ? false : new_quart_qt, qt_is_quart or (qt_is_year and qt_show_lower), Quart_qt, quarlb_qt, qt_is_quart ? 1 : 0, qt_extime)
+    f_qt_manage_layer(qt_mdl == qt_mdl3 ? false : new_month_qt, qt_is_mon   or (qt_is_quart and qt_show_lower), Month_qt, montlb_qt, qt_is_mon ? 1 : 0, qt_extime)
+    f_qt_manage_layer(qt_mdl == qt_mdl3 ? false : new_week_qt,  qt_is_week  or (qt_is_mon and qt_show_lower),   Week_qt,  weeklb_qt, qt_is_week ? 1 : 0, qt_extime)
+    f_qt_manage_layer(new_daily_qt,                              qt_is_day   or (qt_is_week and qt_show_lower),  Day_qt,   daylb_qt,  qt_is_day ? 1 : 0, qt_extime)
+    f_qt_manage_layer(new_sub_qt or new_daily_qt,                qt_is_sub   or (qt_is_day and qt_show_lower),   Sub_qt,   sublb_qt,  qt_is_sub ? 1 : 0, qt_extime)
+    f_qt_manage_layer(new_micro_qt,                              qt_is_micro or (qt_is_sub and qt_show_lower),   Micro_qt, miclb_qt,  qt_is_micro ? 1 : 0, qt_extime)
+    f_qt_manage_layer(new_mini_qt,                               qt_is_micro and qt_show_lower,                  Mini_qt,  minlb_qt,  0, qt_extime)
+
+    f_qt_update_visual(qt_mdl == qt_mdl3 ? false : qt_is_year,  Year_qt, qt_extime)
+    f_qt_update_visual(qt_mdl == qt_mdl3 ? false : (qt_is_quart or (qt_is_year and qt_show_lower)),  Quart_qt, qt_extime)
+    f_qt_update_visual(qt_mdl == qt_mdl3 ? false : (qt_is_mon   or (qt_is_quart and qt_show_lower)), Month_qt, qt_extime)
+    f_qt_update_visual(qt_mdl == qt_mdl3 ? false : (qt_is_week  or (qt_is_mon and qt_show_lower)),   Week_qt, qt_extime)
+    f_qt_update_visual(qt_is_day   or (qt_is_week and qt_show_lower), Day_qt, qt_extime)
+    f_qt_update_visual(qt_is_sub   or (qt_is_day  and qt_show_lower), Sub_qt, qt_extime)
+    f_qt_update_visual(qt_is_micro or (qt_is_sub  and qt_show_lower), Micro_qt, qt_extime)
+    f_qt_update_visual(qt_is_micro and qt_show_lower, Mini_qt, qt_extime)
+
+    if new_year_qt and qt_show_b and (qt_mdl == qt_mdl3 ? not qt_extime : true) and not qt_is_mon
+        qt_new_line := line.new(bar_index, low, bar_index, high, extend = extend.both, color = qt_divi_show ? qt_divi_clr : color.new(qt_divi_clr, 100))
+    if qt_show_b and (qt_mdl == qt_mdl3 ? not qt_extime : true) and qt_is_mon
+        if montlb_qt[1] != "W1" and montlb_qt == "W1"
+            qt_new_line := line.new(bar_index, low, bar_index, high, extend = extend.both, color = qt_divi_show ? qt_divi_clr : color.new(qt_divi_clr, 100))
+
+f_po3_determineAutoTimeframe() =>
+    string tf = timeframe.period
+    switch tf
+        "1"    => "15"
+        "3"    => "30"
+        "5"    => "60"
+        "15"   => "240"
+        "60"   => "1D"
+        "240"  => "1W"
+        "1D"   => "1M"
+        "1W"   => "3M"
+        => 
+            if timeframe.isseconds
+                "1"
+            else if timeframe.isminutes
+                if timeframe.multiplier <= 1
+                    "15"
+                else if timeframe.multiplier <= 3
+                    "30"
+                else if timeframe.multiplier <= 5
+                    "60"
+                else if timeframe.multiplier <= 15
+                    "240"
+                else if timeframe.multiplier <= 60
+                    "1D"
+                else
+                    "1W"
+            else if timeframe.isdaily
+                "1M"
+            else if timeframe.isweekly
+                "3M"
+            else
+                "1M"
+
+f_po3_getSizeMultiplier() =>
+    switch po3_size
+        'Small' => 1
+        'Medium' => 2
+        'Large' => 3
+
+f_po3_getLineStyle(style) =>
+    switch style
+        'Solid' => line.style_solid
+        'Dotted' => line.style_dotted
+        'Dashed' => line.style_dashed
+
+f_po3_getLabelSize(string szInput) =>
+    switch szInput
+        'Auto'   => size.auto
+        'Tiny'   => size.tiny
+        'Small'  => size.small
+        'Normal' => size.normal
+        'Large'  => size.large
+        'Huge'   => size.huge
+        => size.small
+
+f_po3_getCandlePosition(int l_pos, int sizeMult) =>
+    m_pos = l_pos + sizeMult
+    r_pos = l_pos + sizeMult * 2
+    [m_pos, r_pos]
+
+f_po3_formatTimeLabel(int cTime, string tf) =>
+    if na(cTime) or cTime == 0
+        ""
+    else
+        int sec = timeframe.in_seconds(tf)
+        if sec < 3600
+            str.format_time(cTime, "h:mm a", syminfo.timezone)
+        else if sec < 86400
+            str.format_time(cTime, "h a", syminfo.timezone)
+        else if sec == 86400
+            str.format_time(cTime, "EEE", syminfo.timezone)
+        else if sec >= 604800 and sec < 2592000
+            int d = dayofmonth(cTime, syminfo.timezone)
+            int wkNum = int(math.ceil(d / 7.0))
+            string mName = str.format_time(cTime, "MMM", syminfo.timezone)
+            "Wk" + str.tostring(wkNum) + " " + mName
+        else
+            str.format_time(cTime, "MMM", syminfo.timezone)
+
+f_po3_createLabel(int r_pos, float s) =>
+    label.new(r_pos, s, str.tostring(s, format.mintick), style = label.style_label_left, color = color.new(color.black, 100), textcolor = po3_ohlc_col, size = f_po3_getLabelSize(po3_ohlc_size))
+
+f_po3_createLabels(Candle candle, float o, float h, float l, float c, int l_pos, int sizeMult) =>
+    if po3_ohlc_enabled
+        [_, r_pos] = f_po3_getCandlePosition(l_pos, sizeMult)
+        candle.labelO := f_po3_createLabel(r_pos, o)
+        candle.labelH := f_po3_createLabel(r_pos, h)
+        candle.labelL := f_po3_createLabel(r_pos, l)
+        candle.labelC := f_po3_createLabel(r_pos, c)
+
+f_po3_moveLabel(label la, int r_pos, float s) =>
+    if not na(la)
+        la.set_text(str.tostring(s, format.mintick))
+        la.set_xy(r_pos, s)
+
+f_po3_moveLabels(Candle candle, int l_pos, float o, float h, float l, float c, int sizeMult) =>
+    if po3_ohlc_enabled
+        [_, r_pos] = f_po3_getCandlePosition(l_pos, sizeMult)
+        f_po3_moveLabel(candle.labelO, r_pos, o)
+        f_po3_moveLabel(candle.labelH, r_pos, h)
+        f_po3_moveLabel(candle.labelL, r_pos, l)
+        f_po3_moveLabel(candle.labelC, r_pos, c)
+
+f_po3_deleteLabels(Candle candle) =>
+    if not na(candle.labelO)
+        candle.labelO.delete()
+        candle.labelO := na
+    if not na(candle.labelH)
+        candle.labelH.delete()
+        candle.labelH := na
+    if not na(candle.labelL)
+        candle.labelL.delete()
+        candle.labelL := na
+    if not na(candle.labelC)
+        candle.labelC.delete()
+        candle.labelC := na
+
+f_po3_createProjections(Candle candle, float o, float h, float l, float curr_o, float curr_h, float curr_l, float htf_o, float htf_h, float htf_l, int l_pos, bool useHtfData_flag, int sizeMult) =>
+    [m_pos, _] = f_po3_getCandlePosition(l_pos, sizeMult)
+    b_o = bar_index
+    b_h = bar_index
+    b_l = bar_index
+    o_o = o
+    o_h = h
+    o_l = l
+    if useHtfData_flag
+        if htf_o != o
+            b_o -= 1
+            o_o := curr_o
+        if htf_h != h
+            b_h -= 1
+            o_h := curr_h
+        if htf_l != l
+            b_l -= 1
+            o_l := curr_l
+
+    if po3_o_enabled
+        candle.o := line.new(b_o, o_o, m_pos, o_o, style = f_po3_getLineStyle(po3_o_style), color = po3_o_col, width = po3_o_width)
+    if po3_hl_enabled
+        candle.h := line.new(b_h, o_h, m_pos, o_h, style = f_po3_getLineStyle(po3_hl_style), color = po3_hl_col, width = po3_hl_width)
+        candle.l := line.new(b_l, o_l, m_pos, o_l, style = f_po3_getLineStyle(po3_hl_style), color = po3_hl_col, width = po3_hl_width)
+
+f_po3_moveProjections(Candle candle, int l_pos, float o, float h, float l, float curr_o, float curr_h, float curr_l, bool useHtfData_flag, int sizeMult) =>
+    [m_pos, _] = f_po3_getCandlePosition(l_pos, sizeMult)
+    if po3_o_enabled and not na(candle.o)
+        candle.o.set_y1(curr_o)
+        candle.o.set_xy2(m_pos, curr_o)
+    if po3_hl_enabled and not na(candle.h) and not na(candle.l)
+        old_h = candle.h.get_y1()
+        old_l = candle.l.get_y1()
+
+        if h > old_h or (useHtfData_flag and h[1] < old_h)
+            candle.h.set_x1(bar_index)
+        candle.h.set_y1(curr_h)
+        candle.h.set_xy2(m_pos, curr_h)
+
+        if l < old_l or (useHtfData_flag and l[1] > old_l)
+            candle.l.set_x1(bar_index)
+        candle.l.set_y1(curr_l)
+        candle.l.set_xy2(m_pos, curr_l)
+
+f_po3_deleteProjections(Candle candle) =>
+    if not na(candle.o)
+        candle.o.delete()
+        candle.o := na
+    if not na(candle.h)
+        candle.h.delete()
+        candle.h := na
+    if not na(candle.l)
+        candle.l.delete()
+        candle.l := na
+
+f_po3_getCandleProperties(float o, float h, float l, float c) =>
+    h_body = math.max(o, c)
+    l_body = math.min(o, c)
+    body_col   = o > c ? po3_down_col : po3_up_col
+    wick_col   = o > c ? po3_down_col_wick : po3_up_col_wick
+    border_col = o > c ? po3_down_col_border : po3_up_col_border
+    [h_body, l_body, body_col, wick_col, border_col]
+
+f_po3_createCandle(int l_pos, float o, float h, float l, float c, int sizeMult, int candleTime, string currTf) =>
+    [m_pos, r_pos] = f_po3_getCandlePosition(l_pos, sizeMult)
+    [h_body, l_body, body_col, wick_col, border_col] = f_po3_getCandleProperties(o, h, l, c)
+    Candle candle = Candle.new()
+    candle.cTime     := candleTime
+    candle.body      := box.new(l_pos, h_body, r_pos, l_body, border_col, bgcolor = body_col)
+    candle.upperWick := line.new(m_pos, h_body, m_pos, h, color = wick_col)
+    candle.lowerWick := line.new(m_pos, l_body, m_pos, l, color = wick_col)
+    if po3_show_timelbl and not na(candleTime)
+        string txt = f_po3_formatTimeLabel(candleTime, currTf)
+        candle.labelTime := label.new(m_pos, l, txt, style = label.style_label_up, color = color.new(color.black, 100), textcolor = po3_timelbl_col, size = f_po3_getLabelSize(po3_timelbl_size))
+    candle
+
+f_po3_moveCandle(Candle candle, int l_pos, int sizeMult, string currTf) =>
+    [m_pos, r_pos] = f_po3_getCandlePosition(l_pos, sizeMult)
+    if not na(candle.body)
+        candle.body.set_left(l_pos)
+        candle.body.set_right(r_pos)
+    if not na(candle.upperWick)
+        candle.upperWick.set_x1(m_pos)
+        candle.upperWick.set_x2(m_pos)
+    if not na(candle.lowerWick)
+        candle.lowerWick.set_x1(m_pos)
+        candle.lowerWick.set_x2(m_pos)
+    
+    if po3_show_timelbl and not na(candle.cTime)
+        float lowVal = not na(candle.lowerWick) ? candle.lowerWick.get_y2() : (not na(candle.body) ? candle.body.get_bottom() : na)
+        string txt = f_po3_formatTimeLabel(candle.cTime, currTf)
+        if na(candle.labelTime)
+            candle.labelTime := label.new(m_pos, lowVal, txt, style = label.style_label_up, color = color.new(color.black, 100), textcolor = po3_timelbl_col, size = f_po3_getLabelSize(po3_timelbl_size))
+        else
+            candle.labelTime.set_text(txt)
+            candle.labelTime.set_xy(m_pos, lowVal)
+            candle.labelTime.set_textcolor(po3_timelbl_col)
+            candle.labelTime.set_size(f_po3_getLabelSize(po3_timelbl_size))
+
+    if not po3_show_timelbl and not na(candle.labelTime)
+        candle.labelTime.delete()
+        candle.labelTime := na
+
+f_po3_updateCandle(Candle candle, int l_pos, float o, float h, float l, float c, int sizeMult, int candleTime, string currTf) =>
+    [m_pos, r_pos] = f_po3_getCandlePosition(l_pos, sizeMult)
+    [h_body, l_body, body_col, wick_col, border_col] = f_po3_getCandleProperties(o, h, l, c)
+    candle.cTime := candleTime
+    if not na(candle.body)
+        candle.body.set_bgcolor(body_col)
+        candle.body.set_lefttop(l_pos, h_body)
+        candle.body.set_rightbottom(r_pos, l_body)
+        candle.body.set_border_color(border_col)
+    if not na(candle.upperWick)
+        candle.upperWick.set_color(wick_col)
+        candle.upperWick.set_xy1(m_pos, h_body)
+        candle.upperWick.set_xy2(m_pos, h)
+    if not na(candle.lowerWick)
+        candle.lowerWick.set_color(wick_col)
+        candle.lowerWick.set_xy1(m_pos, l_body)
+        candle.lowerWick.set_xy2(m_pos, l)
+    if po3_show_timelbl
+        string txt = f_po3_formatTimeLabel(candleTime, currTf)
+        if na(candle.labelTime)
+            candle.labelTime := label.new(m_pos, l, txt, style = label.style_label_up, color = color.new(color.black, 100), textcolor = po3_timelbl_col, size = f_po3_getLabelSize(po3_timelbl_size))
+        candle.labelTime.set_text(txt)
+        candle.labelTime.set_xy(m_pos, l)
+        candle.labelTime.set_textcolor(po3_timelbl_col)
+        candle.labelTime.set_size(f_po3_getLabelSize(po3_timelbl_size))
+    else
+        if not na(candle.labelTime)
+            candle.labelTime.delete()
+            candle.labelTime := na
+        candle.body.set_left(l_pos)
+
+f_po3_deleteCandle(Candle candle) =>
+    if not na(candle.body)
+        candle.body.delete()
+    if not na(candle.upperWick)
+        candle.upperWick.delete()
+    if not na(candle.lowerWick)
+        candle.lowerWick.delete()
+    if not na(candle.labelTime)
+        candle.labelTime.delete()
+    f_po3_deleteLabels(candle)
+    f_po3_deleteProjections(candle)
+
+var Candle[] po3_candles = array.new<Candle>()
+
+if enable_po3
+    var int po3_maxIndex = po3_num - 1
+    var string po3_curr_tf = po3_tf_auto ? f_po3_determineAutoTimeframe() : po3_tf
+    var bool po3_useHtfData = timeframe.isweekly and po3_htf_data == 'Weekly' or po3_htf_data == 'Always'
+    var int po3_sizeMultiplier = f_po3_getSizeMultiplier()
+
+    if po3_candles.size() == 0
+        for k = 0 to po3_maxIndex
+            po3_candles.push(Candle.new())
+
+    bool po3_newCandle = ta.change(time(po3_curr_tf)) != 0
+
+    [po3_htf_o, po3_htf_h, po3_htf_l, po3_htf_c, po3_htf_t] = request.security(syminfo.tickerid, po3_curr_tf, [open, high, low, close, time], lookahead = barmerge.lookahead_on)
+
+    var float po3_o = na
+    var float po3_h = na
+    var float po3_l = na
+    float po3_c = close
+
+    if po3_newCandle
+        po3_o := open
+        po3_h := high
+        po3_l := low
+    else
+        po3_h := math.max(high, po3_h)
+        po3_l := math.min(low, po3_l)
+
+    float po3_curr_o = po3_o
+    float po3_curr_h = po3_h
+    float po3_curr_l = po3_l
+    float po3_curr_c = po3_c
+
+    if po3_useHtfData
+        po3_curr_o := po3_htf_o
+        po3_curr_h := po3_htf_h
+        po3_curr_l := po3_htf_l
+        po3_curr_c := po3_htf_c
+
+    float po3_candle_o = po3_curr_o
+    float po3_candle_h = po3_curr_h
+    float po3_candle_l = po3_curr_l
+    float po3_candle_c = po3_curr_c
+
+    int candleTimestamp = na(po3_htf_t) ? time : int(po3_htf_t)
+
+    if po3_newCandle and po3_candles.size() > 0
+        Candle oldCandle = po3_candles.shift()
+        f_po3_deleteCandle(oldCandle)
+        int pos = bar_index + po3_offset + po3_maxIndex * (po3_margin + 2 * po3_sizeMultiplier)
+        Candle newCandleObj = f_po3_createCandle(pos, po3_candle_o, po3_candle_h, po3_candle_l, po3_candle_c, po3_sizeMultiplier, candleTimestamp, po3_curr_tf)
+        f_po3_createProjections(newCandleObj, po3_o, po3_h, po3_l, po3_curr_o, po3_curr_h, po3_curr_l, po3_htf_o, po3_htf_h, po3_htf_l, pos, po3_useHtfData, po3_sizeMultiplier)
+        f_po3_createLabels(newCandleObj, po3_curr_o, po3_curr_h, po3_curr_l, po3_curr_c, pos, po3_sizeMultiplier)
+        po3_candles.push(newCandleObj)
+
+    if po3_candles.size() > 0
+        for k = 0 to po3_candles.size() - 1
+            Candle cObj = po3_candles.get(k)
+            int new_pos = bar_index + po3_offset + k * (po3_margin + 2 * po3_sizeMultiplier)
+            if k < po3_maxIndex
+                f_po3_moveCandle(cObj, new_pos, po3_sizeMultiplier, po3_curr_tf)
+                f_po3_deleteProjections(cObj)
+                f_po3_deleteLabels(cObj)
+            else
+                f_po3_updateCandle(cObj, new_pos, po3_candle_o, po3_candle_h, po3_candle_l, po3_candle_c, po3_sizeMultiplier, candleTimestamp, po3_curr_tf)
+                f_po3_moveProjections(cObj, new_pos, po3_o, po3_h, po3_l, po3_curr_o, po3_curr_h, po3_curr_l, po3_useHtfData, po3_sizeMultiplier)
+                f_po3_moveLabels(cObj, new_pos, po3_curr_o, po3_curr_h, po3_curr_l, po3_curr_c, po3_sizeMultiplier)
